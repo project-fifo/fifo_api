@@ -19,6 +19,8 @@
          get/2
         ]).
 
+-define(ENDPOINT, "/datasets").
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Lists all the Datasets for the current user, when Full is false only
@@ -31,8 +33,24 @@
 %%--------------------------------------------------------------------
 -spec list(Full :: boolean(), Fields :: [binary()], fifo_api:connection()) ->
                   {ok, JSON :: binary()}.
-list(_Fill, _Fields, _Con) ->
-    {ok, <<>>}.
+
+list(false, _, C) ->
+    case fifo_api_http:get(?ENDPOINT, C) of
+        {ok, _H, B} ->
+            {ok, B};
+        E ->
+            E
+    end;
+
+list(true, Fields, C) ->
+    Opts = [{<<"x-full-list">>, <<"true">>},
+            {<<"x-full-list-fields">>, fifo_api_http:full_list(Fields)}],
+    case fifo_api_http:get(?ENDPOINT, Opts, C) of
+        {ok, _H, B} ->
+            {ok, B};
+        E ->
+            E
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -42,5 +60,10 @@ list(_Fill, _Fields, _Con) ->
 -spec get(UUID :: binary(), fifo_api:connection()) ->
                   {ok, JSON :: binary()}.
 
-get(_UUID, _Con) ->
-    {ok, <<>>}.
+get(UUID, C) ->
+    case fifo_api_http:get(?ENDPOINT ++ binary_to_list(UUID), C) of
+        {ok, _H, B} ->
+            {ok, B};
+        E ->
+            E
+    end.
