@@ -25,6 +25,8 @@
               delete_sshkey/3
              ]).
 
+-define(ENDPOINT, "/users").
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Lists all the Datasets for the current user, when Full is false only
@@ -40,7 +42,7 @@
                   {ok, JSON :: binary()}.
 
 list(false, _, C) ->
-    case fifo_api_http:get("/users", C) of
+    case fifo_api_http:get(?ENDPOINT, C) of
         {ok, _H, B} ->
             {ok, B};
         E ->
@@ -50,7 +52,7 @@ list(false, _, C) ->
 list(true, Fields, C) ->
     Opts = [{<<"x-full-list">>, <<"true">>},
             {<<"x-full-list-fields">>, fifo_api_http:full_list(Fields)}],
-    case fifo_api_http:get("/users", Opts, C) of
+    case fifo_api_http:get(?ENDPOINT, Opts, C) of
         {ok, _H, B} ->
             {ok, B};
         E ->
@@ -66,7 +68,7 @@ list(true, Fields, C) ->
                  {ok, JSON :: binary()}.
 
 get(UUID, C) ->
-    case fifo_api_http:get("/users/" ++ binary_to_list(UUID), C) of
+    case fifo_api_http:get(?ENDPOINT ++ "/"  ++ binary_to_list(UUID), C) of
         {ok, _H, B} ->
             {ok, B};
         E ->
@@ -108,7 +110,7 @@ auth(Login, Pass, C) ->
     ok.
 
 add_sshkey(UUID, KeyID, Key, C) ->
-    URL = "/users/" ++ binary_to_list(UUID) ++ "/keys",
+    URL = ?ENDPOINT ++ "/" ++ binary_to_list(UUID) ++ "/keys",
     Body = [{KeyID, Key}],
     fifo_api_http:put(URL, Body, C).
 
@@ -124,6 +126,6 @@ add_sshkey(UUID, KeyID, Key, C) ->
     ok.
 
 delete_sshkey(UUID, KeyID, C) ->
-    URL = "/users/" ++ binary_to_list(UUID) ++ "/keys/"
+    URL = ?ENDPOINT ++ "/" ++ binary_to_list(UUID) ++ "/keys/"
         ++ binary_to_list(KeyID),
     fifo_api_http:delete(URL, C).
