@@ -51,7 +51,7 @@
 %% @doc
 %% Lists all the VM's for the current user, when Full is false only
 %% the UUID of the VM's are returned, otehrwise the full data is
-%% returned.
+%% Returnedn.
 %%
 %% When returning the full data Fields can be used to filter the
 %% parts of the VM config that are being returned.

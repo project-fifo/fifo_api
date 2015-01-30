@@ -3,13 +3,13 @@
   {description, "An Erlang fifo_api library"},
   {vsn, "1"},
   {modules, [
-             lager,
-             hackney,
-             jsx,
              fifo_api
             ]},
   {registered, []},
   {applications, [
+                  lager,
+                  hackney,
+                  jsx,
                   kernel,
                   stdlib
                  ]},

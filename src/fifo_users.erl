@@ -13,7 +13,7 @@
          list/3,
          get/2,
          auth/3,
-         add_sshkey/3,
+         add_sshkey/4,
          delete_sshkey/3
         ]).
 
@@ -21,9 +21,8 @@
               list/3,
               get/2,
               auth/3,
-              add_sshkey/3,
+              add_sshkey/4,
               delete_sshkey/3
-
              ]).
 
 %%--------------------------------------------------------------------
@@ -36,21 +35,43 @@
 %% parts of the Dataset config that are being returned.
 %% @end
 %%--------------------------------------------------------------------
--spec list(Full :: boolean(), Fields :: [binary()], fifo_api:connection()) ->
+-spec list(Full :: boolean(), Fields :: [binary()],
+           fifo_api_http:connection()) ->
                   {ok, JSON :: binary()}.
-list(_Fill, _Fields, _Con) ->
-    {ok, <<>>}.
+
+list(false, _, C) ->
+    case fifo_api_http:get("/users", C) of
+        {ok, _H, B} ->
+            {ok, B};
+        E ->
+            E
+    end;
+
+list(true, Fields, C) ->
+    Opts = [{<<"x-full-list">>, <<"true">>},
+            {<<"x-full-list-fields">>, fifo_api_http:full_list(Fields)}],
+    case fifo_api_http:get("/users", Opts, C) of
+        {ok, _H, B} ->
+            {ok, B};
+        E ->
+            E
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
 %% Fetches the config data for a single Dataset.
 %% @end
 %%--------------------------------------------------------------------
--spec get(UUID :: binary(), fifo_api:connection()) ->
+-spec get(UUID :: binary(), fifo_api_http:connection()) ->
                  {ok, JSON :: binary()}.
 
-get(_UUID, _Con) ->
-    {ok, <<>>}.
+get(UUID, C) ->
+    case fifo_api_http:get("/users/" ++ binary_to_list(UUID), C) of
+        {ok, _H, B} ->
+            {ok, B};
+        E ->
+            E
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -58,11 +79,23 @@ get(_UUID, _Con) ->
 %% @end
 %%--------------------------------------------------------------------
 
--spec auth(Login :: binary(), Pass :: binary(), fifo_api:connection()) ->
+-spec auth(Login :: binary(), Pass :: binary(), fifo_api_http:connection()) ->
                   {ok, Token :: binary()}.
 
-auth(_User, _Pass, _Con) ->
-    {ok, <<>>}.
+auth(Login, Pass, C) ->
+    Body = [{<<"user">>, Login}, {<<"password">>, Pass}],
+    Method = post,
+    URL = fifo_api_http:url("/sessions", C),
+    ReqHeaders = [{<<"accept-encoding">>, <<"application/x-msgpack">>},
+                  {<<"content-type">>, <<"application/x-msgpack">>}],
+    ReqBody = msgpack:pack(Body, [jsx]),
+    case hackney:request(Method, URL, ReqHeaders, ReqBody, []) of
+        {ok, 303, H, _Ref} ->
+            Token = proplists:get_value(<<"x-snarl-token">>, H),
+            {ok, Token};
+         {ok, Error, _, _} ->
+            {error, Error}
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -70,12 +103,15 @@ auth(_User, _Pass, _Con) ->
 %% @end
 %%--------------------------------------------------------------------
 
--spec add_sshkey(UUID :: binary(), Key :: binary(),
-                 fifo_api:connection()) ->
+-spec add_sshkey(UUID :: binary(), KeyID :: binary(), Key :: binary(),
+                 fifo_api_http:connection()) ->
     ok.
 
-add_sshkey(_UUID, _Key, _Con) ->
-    {ok, <<>>}.
+add_sshkey(UUID, KeyID, Key, C) ->
+    URL = "/users/" ++ binary_to_list(UUID) ++ "/keys",
+    Body = [{KeyID, Key}],
+    fifo_api_http:put(URL, Body, C).
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -84,8 +120,10 @@ add_sshkey(_UUID, _Key, _Con) ->
 %%--------------------------------------------------------------------
 
 -spec delete_sshkey(UUID :: binary(), KeyID :: binary(),
-                    fifo_api:connection()) ->
+                    fifo_api_http:connection()) ->
     ok.
 
-delete_sshkey(_UUID, _KeyID, _Con) ->
-    {ok, <<>>}.
+delete_sshkey(UUID, KeyID, C) ->
+    URL = "/users/" ++ binary_to_list(UUID) ++ "/keys/"
+        ++ binary_to_list(KeyID),
+    fifo_api_http:delete(URL, C).
