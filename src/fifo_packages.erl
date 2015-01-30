@@ -21,7 +21,6 @@
 
 -define(ENDPOINT, "/packages").
 
-
 %%--------------------------------------------------------------------
 %% @doc
 %% Lists all the Packages for the current user, when Full is false only
@@ -36,22 +35,12 @@
                   {ok, JSON :: binary()}.
 
 list(false, _, C) ->
-    case fifo_api_http:get(?ENDPOINT, C) of
-        {ok, _H, B} ->
-            {ok, B};
-        E ->
-            E
-    end;
+    fifo_api_http:get(?ENDPOINT, C);
 
 list(true, Fields, C) ->
     Opts = [{<<"x-full-list">>, <<"true">>},
             {<<"x-full-list-fields">>, fifo_api_http:full_list(Fields)}],
-    case fifo_api_http:get(?ENDPOINT, Opts, C) of
-        {ok, _H, B} ->
-            {ok, B};
-        E ->
-            E
-    end.
+    fifo_api_http:get(?ENDPOINT, Opts, C).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -62,9 +51,4 @@ list(true, Fields, C) ->
                   {ok, JSON :: binary()}.
 
 get(UUID, C) ->
-    case fifo_api_http:get(?ENDPOINT ++ binary_to_list(UUID), C) of
-        {ok, _H, B} ->
-            {ok, B};
-        E ->
-            E
-    end.
+    fifo_api_http:get([?ENDPOINT, $/, UUID], C).

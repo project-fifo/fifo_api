@@ -8,8 +8,10 @@
 %%%-------------------------------------------------------------------
 -module(fifo_api_http).
 
--export([new/1, get/2, get/3, post/3, put/3, set_token/2, url/2, full_list/1,
+-export([new/1, get/2, get/3, post/3, put/3, set_token/2, url/2,
         delete/2, delete/3]).
+
+-export([take_last/1, full_list/1]).
 
 -export_type([connection/0, connection_options/0]).
 
@@ -51,10 +53,10 @@ get(Path, Opts, C) ->
     ReqBody = <<>>,
     Options = [{follow_redirect, true}, {max_redirect, 5}],
     case hackney:request(Method, URL, ReqHeaders, ReqBody, Options) of
-        {ok, 200, H, Ref} ->
+        {ok, 200, _H, Ref} ->
             {ok, Body1} = hackney:body(Ref),
             {ok, Body2} = msgpack:unpack(Body1),
-            {ok, H, Body2};
+            {ok, Body2};
          {ok, Error, _, _} ->
             {error, Error}
     end.
@@ -66,29 +68,39 @@ delete(Path, Opts, C) ->
     ReqBody = <<>>,
     Options = [{follow_redirect, true}, {max_redirect, 5}],
     case hackney:request(Method, URL, ReqHeaders, ReqBody, Options) of
-        {ok, 200, H, Ref} ->
+        {ok, 200, _H, Ref} ->
             {ok, Body1} = hackney:body(Ref),
             {ok, Body2} = msgpack:unpack(Body1),
-            {ok, H, Body2};
+            {ok, Body2};
         {ok, 204, _H, _} ->
             ok;
         {ok, Error, _, _} ->
             {error, Error}
     end.
 
-post(Path, Body, C) ->
+post(Path, Body, C = #connection{endpoint = Endpoint}) ->
     Method = post,
     URL = url(Path, C),
     ReqHeaders = token_opts([{<<"accept-encoding">>, ?MSGPACK},
                              {<<"content-type">>, ?JSON}], C),
     ReqBody = msgpack:pack(Body, [jsx]),
-    Options = [{follow_redirect, true}, {max_redirect, 5}],
-    case hackney:request(Method, URL, ReqHeaders, ReqBody, Options) of
-        {ok, 200, H, Ref} ->
+    case hackney:request(Method, URL, ReqHeaders, ReqBody, []) of
+        {ok, 200, _H, Ref} ->
             {ok, Body1} = hackney:body(Ref),
             {ok, Body2} = msgpack:unpack(Body1),
-            {ok, H, Body2};
-         {ok, Error, _, _} ->
+            {ok, Body2};
+        {ok, 303, H, _Ref} ->
+            Location = proplists:get_value(<<"location">>, H),
+            case hackney:request(get, [Endpoint, Location],
+                                 ReqHeaders, ReqBody, []) of
+                {ok, 200, _H, Ref} ->
+                    {ok, Body1} = hackney:body(Ref),
+                    {ok, Body2} = msgpack:unpack(Body1),
+                    {ok, Body2};
+                {ok, Error, _, _} ->
+                    {error, Error}
+            end;
+        Error ->
             {error, Error}
     end.
 
@@ -100,10 +112,10 @@ put(Path, Body, C) ->
     ReqBody = msgpack:pack(Body, [jsx]),
     Options = [{follow_redirect, true}, {max_redirect, 5}],
     case hackney:request(Method, URL, ReqHeaders, ReqBody, Options) of
-        {ok, 200, H, Ref} ->
+        {ok, 200, _H, Ref} ->
             {ok, Body1} = hackney:body(Ref),
             {ok, Body2} = msgpack:unpack(Body1),
-            {ok, H, Body2};
+            {ok, Body2};
         {ok, 204, _H, _} ->
             ok;
          {ok, Error, _, _} ->
@@ -116,7 +128,17 @@ url(["/" | Path], C) ->
 
 url(Path,
     #connection{endpoint = Endpoint, prefix = Prefix, version = Version}) ->
-    Endpoint ++ "/" ++ Prefix ++ "/" ++ Version ++ "/" ++ Path.
+    [Endpoint, $/, Prefix, $/, Version, $/, Path].
+
+take_last(L) ->
+    take_last(L, []).
+
+
+take_last([E], R) ->
+    {lists:reverse(R), E};
+take_last([E | R], L) ->
+    take_last(R, [E | L]).
+
 
 full_list(L) ->
     list_to_binary(string:join([to_l(E) || E <- L], ",")).

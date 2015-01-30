@@ -16,7 +16,7 @@
          delete/2,
          start/2,
          stop/3,
-         restart/3,
+         reboot/3,
          metadata_set/4,
          snapshot_create/3,
          snapshot_delete/3,
@@ -35,7 +35,7 @@
          delete/2,
          start/2,
          stop/3,
-         restart/3,
+         reboot/3,
          metadata_set/4,
          snapshot_create/3,
          snapshot_delete/3,
@@ -46,6 +46,8 @@
          backup_rollback/3,
          change/4
         ]).
+
+-define(ENDPOINT, "/vms").
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -59,8 +61,13 @@
 %%--------------------------------------------------------------------
 -spec list(Full :: boolean(), Fields :: [binary()], fifo_api:connection()) ->
                   {ok, JSON :: binary()}.
-list(_Fill, _Fields, _Con) ->
-    {ok, <<>>}.
+list(false, _, C) ->
+    fifo_api_http:get(?ENDPOINT, C);
+
+list(true, Fields, C) ->
+    Opts = [{<<"x-full-list">>, <<"true">>},
+            {<<"x-full-list-fields">>, fifo_api_http:full_list(Fields)}],
+    fifo_api_http:get(?ENDPOINT, Opts, C).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -70,8 +77,8 @@ list(_Fill, _Fields, _Con) ->
 -spec get(UUID :: binary(), fifo_api:connection()) ->
                   {ok, JSON :: binary()}.
 
-get(_UUID, _Con) ->
-    {ok, <<>>}.
+get(UUID, C) ->
+    fifo_api_http:get([?ENDPOINT, "/", UUID], C).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -83,8 +90,11 @@ get(_UUID, _Con) ->
              ConfigJSON :: jsx:json_term(),
           fifo_api:connection()) ->
                  {ok, UUID :: binary()}.
-create(_Dataset, _Package, _Config, _Con) ->
-    {ok, <<>>}.
+create(Dataset, Package, Config, C) ->
+    Body = [{<<"package">>, Package},
+            {<<"dataset">>, Dataset},
+            {<<"config">>, Config}],
+    fifo_api_http:post(?ENDPOINT, Body, C).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -93,8 +103,9 @@ create(_Dataset, _Package, _Config, _Con) ->
 %%--------------------------------------------------------------------
 -spec delete(UUID :: binary(), fifo_api:connection()) ->
                     ok.
-delete(_UUID, _Con) ->
-    ok.
+delete(UUID, C) ->
+    URL = [?ENDPOINT, $/, UUID],
+    fifo_api_http:delete(URL, C).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -103,8 +114,10 @@ delete(_UUID, _Con) ->
 %%--------------------------------------------------------------------
 -spec start(UUID :: binary(), fifo_api:connection()) ->
                    ok.
-start(_UUID, _Con) ->
-    ok.
+start(UUID, C) ->
+    URL = [?ENDPOINT, $/, UUID],
+    Body = [{<<"action">>, <<"start">>}],
+    fifo_api_http:put(URL, Body, C).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -113,18 +126,32 @@ start(_UUID, _Con) ->
 %%--------------------------------------------------------------------
 -spec stop(UUID :: binary(), Force :: boolean(), fifo_api:connection()) ->
                    ok.
-stop(_UUID, _Force, _Con) ->
-    ok.
+stop(UUID, false, C) ->
+    URL = [?ENDPOINT, $/, UUID],
+    Body = [{<<"action">>, <<"stop">>}],
+    fifo_api_http:put(URL, Body, C);
+
+stop(UUID, true, C) ->
+    URL = [?ENDPOINT, $/, UUID],
+    Body = [{<<"action">>, <<"stop">>}, {<<"force">>, true}],
+    fifo_api_http:put(URL, Body, C).
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Restarts a VM, if Force is true it will force restart the vm.
+%% Reboots a VM, if Force is true it will force reboot the vm.
 %% @end
 %%--------------------------------------------------------------------
--spec restart(UUID :: binary(), Force :: boolean(), fifo_api:connection()) ->
+-spec reboot(UUID :: binary(), Force :: boolean(), fifo_api:connection()) ->
                    ok.
-restart(_UUID, _Force, _Con) ->
-    ok.
+reboot(UUID, false, C) ->
+    URL = [?ENDPOINT, $/, UUID],
+    Body = [{<<"action">>, <<"reboot">>}],
+    fifo_api_http:put(URL, Body, C);
+
+reboot(UUID, true, C) ->
+    URL = [?ENDPOINT, $/, UUID],
+    Body = [{<<"action">>, <<"reboot">>}, {<<"force">>, true}],
+    fifo_api_http:put(URL, Body, C).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -135,8 +162,12 @@ restart(_UUID, _Force, _Con) ->
 -spec metadata_set(UUID :: binary(), Path :: [binary()],
                    Value :: binary() | number(), fifo_api:connection()) ->
                           ok.
-metadata_set(_UUID, _Path, _Value, _Con) ->
-    ok.
+metadata_set(UUID, Path, Value, C) ->
+    {Prefix, K} = fifo_api_http:take_last(Path),
+    Body = [{K, Value}],
+    URLElements = [?ENDPOINT, binary_to_list(UUID), "metadata" | Prefix],
+    URL = strings:join(URLElements, "/"),
+    fifo_api_http:put(URL, Body, C).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -146,8 +177,10 @@ metadata_set(_UUID, _Path, _Value, _Con) ->
 -spec snapshot_create(UUID :: binary(), Comment :: binary(),
                       fifo_api:connection()) ->
                              ok.
-snapshot_create(_UUID, _Comment, _Con) ->
-    ok.
+snapshot_create(UUID, Comment, C) ->
+    URL = [?ENDPOINT, $/, UUID, "/snapshots"],
+    Body = [{<<"comment">>, Comment}],
+    fifo_api_http:post(URL, Body, C).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -157,8 +190,9 @@ snapshot_create(_UUID, _Comment, _Con) ->
 -spec snapshot_delete(UUID :: binary(), SnapshotUUID :: binary(),
                       fifo_api:connection()) ->
                              ok.
-snapshot_delete(_UUID, _SnapshotUUID, _Con) ->
-    ok.
+snapshot_delete(UUID, SnapshotUUID, C) ->
+    URL = [?ENDPOINT, $/, UUID, "/snapshots/", SnapshotUUID],
+    fifo_api_http:delete(URL, C).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -168,8 +202,10 @@ snapshot_delete(_UUID, _SnapshotUUID, _Con) ->
 -spec snapshot_rollback(UUID :: binary(), SnapshotUUID :: binary(),
                       fifo_api:connection()) ->
                              ok.
-snapshot_rollback(_UUID, _SnapshotUUID, _Con) ->
-    ok.
+snapshot_rollback(UUID, SnapshotUUID, C) ->
+    URL = [?ENDPOINT, $/, UUID, "/snapshots/", SnapshotUUID],
+    Body = [{<<"action">>, <<"start">>}],
+    fifo_api_http:put(URL, Body, C).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -179,8 +215,10 @@ snapshot_rollback(_UUID, _SnapshotUUID, _Con) ->
 -spec backup_create(UUID :: binary(), Comment :: binary(),
                       fifo_api:connection()) ->
                              ok.
-backup_create(_UUID, _Comment, _Con) ->
-    ok.
+backup_create(UUID, Comment, C) ->
+    URL = [?ENDPOINT, $/, UUID, "/backups"],
+    Body = [{<<"comment">>, Comment}],
+    fifo_api_http:post(URL, Body, C).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -191,8 +229,10 @@ backup_create(_UUID, _Comment, _Con) ->
 -spec backup_create(UUID :: binary(), Parent :: binary(), Comment :: binary(),
                       fifo_api:connection()) ->
                              ok.
-backup_create(_UUID, _Parent, _Comment, _Con) ->
-    ok.
+backup_create(UUID, Parent, Comment, C) ->
+    URL = [?ENDPOINT, $/, UUID, "/backups"],
+    Body = [{<<"comment">>, Comment}, {<<"parent">>, Parent}],
+    fifo_api_http:post(URL, Body, C).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -202,8 +242,9 @@ backup_create(_UUID, _Parent, _Comment, _Con) ->
 -spec backup_delete(UUID :: binary(), BackupUUID :: binary(),
                       fifo_api:connection()) ->
                              ok.
-backup_delete(_UUID, _BackupUUID, _Con) ->
-	ok.
+backup_delete(UUID, BackupUUID, C) ->
+    URL = [?ENDPOINT, $/, UUID, "/backups/", BackupUUID],
+    fifo_api_http:delete(URL, C).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -213,8 +254,10 @@ backup_delete(_UUID, _BackupUUID, _Con) ->
 -spec backup_rollback(UUID :: binary(), BackupUUID :: binary(),
                       fifo_api:connection()) ->
                              ok.
-backup_rollback(_UUID, _BackupUUID, _Con) ->
-	ok.
+backup_rollback(UUID, BackupUUID, C) ->
+    URL = [?ENDPOINT, $/, UUID, "/backups/", BackupUUID],
+    Body = [{<<"action">>, <<"start">>}],
+    fifo_api_http:put(URL, Body, C).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -225,5 +268,19 @@ backup_rollback(_UUID, _BackupUUID, _Con) ->
 -spec change(UUID :: binary(), NewPackage :: binary(),
              NewConfig :: jsx:json_term(), fifo_api:connection()) ->
                     ok.
-change(_UUID, _NewPackage, _NewConfig, _Con) ->
-    ok.
+change(UUID, undefined, NewConfig, C) ->
+    URL = [?ENDPOINT, $/, UUID],
+    Body = [{<<"config">>, NewConfig}],
+    fifo_api_http:put(URL, Body, C);
+
+change(UUID, NewPackage, undefined, C) ->
+    URL = [?ENDPOINT, $/, UUID],
+    Body = [{<<"package">>, NewPackage},
+            {<<"config">>, []}],
+    fifo_api_http:put(URL, Body, C);
+
+change(UUID, NewPackage, NewConfig, C) ->
+    URL = [?ENDPOINT, $/, UUID],
+    Body = [{<<"package">>, NewPackage},
+            {<<"config">>, NewConfig}],
+    fifo_api_http:put(URL, Body, C).

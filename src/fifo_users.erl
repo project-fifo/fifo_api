@@ -42,22 +42,12 @@
                   {ok, JSON :: binary()}.
 
 list(false, _, C) ->
-    case fifo_api_http:get(?ENDPOINT, C) of
-        {ok, _H, B} ->
-            {ok, B};
-        E ->
-            E
-    end;
+    fifo_api_http:get(?ENDPOINT, C);
 
 list(true, Fields, C) ->
     Opts = [{<<"x-full-list">>, <<"true">>},
             {<<"x-full-list-fields">>, fifo_api_http:full_list(Fields)}],
-    case fifo_api_http:get(?ENDPOINT, Opts, C) of
-        {ok, _H, B} ->
-            {ok, B};
-        E ->
-            E
-    end.
+    fifo_api_http:get(?ENDPOINT, Opts, C).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -68,12 +58,7 @@ list(true, Fields, C) ->
                  {ok, JSON :: binary()}.
 
 get(UUID, C) ->
-    case fifo_api_http:get(?ENDPOINT ++ "/"  ++ binary_to_list(UUID), C) of
-        {ok, _H, B} ->
-            {ok, B};
-        E ->
-            E
-    end.
+    fifo_api_http:get([?ENDPOINT, $/, UUID], C).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -110,7 +95,7 @@ auth(Login, Pass, C) ->
     ok.
 
 add_sshkey(UUID, KeyID, Key, C) ->
-    URL = ?ENDPOINT ++ "/" ++ binary_to_list(UUID) ++ "/keys",
+    URL = [?ENDPOINT, $/, UUID, "/keys"],
     Body = [{KeyID, Key}],
     fifo_api_http:put(URL, Body, C).
 
@@ -126,6 +111,5 @@ add_sshkey(UUID, KeyID, Key, C) ->
     ok.
 
 delete_sshkey(UUID, KeyID, C) ->
-    URL = ?ENDPOINT ++ "/" ++ binary_to_list(UUID) ++ "/keys/"
-        ++ binary_to_list(KeyID),
+    URL = [?ENDPOINT, $/, UUID, "/keys/", KeyID],
     fifo_api_http:delete(URL, C).
