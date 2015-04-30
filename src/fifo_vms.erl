@@ -10,6 +10,7 @@
 -module(fifo_vms).
 
 -export([
+         list/1,
          list/3,
          get/2,
          create/4,
@@ -47,7 +48,7 @@
          change/4
         ]).
 
--define(ENDPOINT, "/vms").
+-define(ENDPOINT, "vms").
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -68,6 +69,11 @@ list(true, Fields, C) ->
     Opts = [{<<"x-full-list">>, <<"true">>},
             {<<"x-full-list-fields">>, fifo_api_http:full_list(Fields)}],
     fifo_api_http:get(?ENDPOINT, Opts, C).
+
+-spec list(fifo_api:connection()) ->
+                  {ok, JSON :: binary()}.
+list(C) ->
+    list(false, [], C).
 
 %%--------------------------------------------------------------------
 %% @doc

@@ -1,7 +1,7 @@
 {application, fifo_api,
  [
   {description, "An Erlang fifo_api library"},
-  {vsn, "1"},
+  {vsn, "0.1.0"},
   {modules, [
              fifo_api
             ]},

@@ -70,16 +70,17 @@ get(UUID, C) ->
                   {ok, Token :: binary()}.
 
 auth(Login, Pass, C) ->
-    Body = [{<<"user">>, Login}, {<<"password">>, Pass}],
+    Body = [{<<"username">>, Login}, {<<"password">>, Pass},
+            {<<"grant_type">>, <<"password">>}],
     Method = post,
-    URL = fifo_api_http:url("/sessions", C),
-    ReqHeaders = [{<<"accept-encoding">>, <<"application/x-msgpack">>},
-                  {<<"content-type">>, <<"application/x-msgpack">>}],
-    ReqBody = msgpack:pack(Body, [jsx]),
-    case hackney:request(Method, URL, ReqHeaders, ReqBody, []) of
-        {ok, 303, H, _Ref} ->
-            Token = proplists:get_value(<<"x-snarl-token">>, H),
-            {ok, Token};
+    URL = fifo_api_http:url("oauth/token", C),
+    ReqHeaders = [{<<"accept-encoding">>, <<"application/json">>},
+                  {<<"content-type">>, <<"application/x-www-form-urlencoded">>}],
+    case hackney:request(Method, URL, ReqHeaders, {form, Body}, [{timeout, 5000}]) of
+        {ok, 200, _H, Ref} ->
+            {ok, Body1} = hackney:body(Ref),
+            Body2 = jsx:decode(Body1),
+            jsxd:get(<<"access_token">>, Body2);
          {ok, Error, _, _} ->
             {error, Error}
     end.

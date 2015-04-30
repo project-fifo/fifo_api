@@ -18,7 +18,7 @@
 -record(connection, {
           endpoint = "http://localhost" :: string(),
           prefix = "api" :: string(),
-          version = "0.1.0" :: string(),
+          version = "0.2.0" :: string(),
           token :: binary() | undefined
          }).
 
@@ -33,12 +33,22 @@
 -define(MSGPACK,  <<"application/x-msgpack">>).
 -define(JSON,  <<"application/json">>).
 
+-define(POOL, fifo).
+-define(MIN_OPTS, [{timeout, 5000}, {pool, ?POOL}]).
+-define(OPTS, [{follow_redirect, true}, {max_redirect, 5} | ?MIN_OPTS]).
+
 new(Options) ->
+    case hackney_pool:find_pool(?POOL) of
+        undefined ->
+            PoolOpts = [{timeout, 5000}, {max_connections, 50}],
+            ok = hackney_pool:start_pool(?POOL, PoolOpts);
+        _ ->
+            ok
+    end,
     new(Options, #connection{}).
 
 set_token(Token, C) ->
     C#connection{token = Token}.
-
 
 get(Path, C) ->
     get(Path, [], C).
@@ -51,30 +61,32 @@ get(Path, Opts, C) ->
     URL = url(Path, C),
     ReqHeaders = token_opts([{<<"accept-encoding">>, ?MSGPACK} | Opts], C),
     ReqBody = <<>>,
-    Options = [{follow_redirect, true}, {max_redirect, 5}],
-    case hackney:request(Method, URL, ReqHeaders, ReqBody, Options) of
+    case hackney:request(Method, URL, ReqHeaders, ReqBody, ?OPTS) of
         {ok, 200, _H, Ref} ->
             {ok, Body1} = hackney:body(Ref),
-            {ok, Body2} = msgpack:unpack(Body1),
+            {ok, Body2} = msgpack:unpack(Body1, [jsx]),
             {ok, Body2};
-         {ok, Error, _, _} ->
+         {ok, Error, _, Ref} ->
+            hackney:body(Ref),
             {error, Error}
     end.
+
 
 delete(Path, Opts, C) ->
     Method = delete,
     URL = url(Path, C),
     ReqHeaders = token_opts([{<<"accept-encoding">>, ?MSGPACK} | Opts], C),
     ReqBody = <<>>,
-    Options = [{follow_redirect, true}, {max_redirect, 5}],
-    case hackney:request(Method, URL, ReqHeaders, ReqBody, Options) of
+    case hackney:request(Method, URL, ReqHeaders, ReqBody, ?OPTS) of
         {ok, 200, _H, Ref} ->
             {ok, Body1} = hackney:body(Ref),
-            {ok, Body2} = msgpack:unpack(Body1),
+            {ok, Body2} = msgpack:unpack(Body1, [jsx]),
             {ok, Body2};
-        {ok, 204, _H, _} ->
+        {ok, 204, _H, Ref} ->
+            hackney:body(Ref),
             ok;
-        {ok, Error, _, _} ->
+        {ok, Error, _, Ref} ->
+            hackney:body(Ref),
             {error, Error}
     end.
 
@@ -82,22 +94,24 @@ post(Path, Body, C = #connection{endpoint = Endpoint}) ->
     Method = post,
     URL = url(Path, C),
     ReqHeaders = token_opts([{<<"accept-encoding">>, ?MSGPACK},
-                             {<<"content-type">>, ?JSON}], C),
+                             {<<"content-type">>, ?MSGPACK}], C),
     ReqBody = msgpack:pack(Body, [jsx]),
-    case hackney:request(Method, URL, ReqHeaders, ReqBody, []) of
+    case hackney:request(Method, URL, ReqHeaders, ReqBody, ?MIN_OPTS) of
         {ok, 200, _H, Ref} ->
             {ok, Body1} = hackney:body(Ref),
-            {ok, Body2} = msgpack:unpack(Body1),
+            {ok, Body2} = msgpack:unpack(Body1, [jsx]),
             {ok, Body2};
-        {ok, 303, H, _Ref} ->
+        {ok, 303, H, Ref} ->
+            hackney:body(Ref),
             Location = proplists:get_value(<<"location">>, H),
             case hackney:request(get, [Endpoint, Location],
                                  ReqHeaders, ReqBody, []) of
-                {ok, 200, _H, Ref} ->
-                    {ok, Body1} = hackney:body(Ref),
-                    {ok, Body2} = msgpack:unpack(Body1),
+                {ok, 200, _H, Ref1} ->
+                    {ok, Body1} = hackney:body(Ref1),
+                    {ok, Body2} = msgpack:unpack(Body1, [jsx]),
                     {ok, Body2};
-                {ok, Error, _, _} ->
+                {ok, Error, _, Ref1} ->
+                    hackney:body(Ref1),
                     {error, Error}
             end;
         Error ->
@@ -110,20 +124,21 @@ put(Path, Body, C) ->
     ReqHeaders = token_opts([{<<"accept-encoding">>, ?MSGPACK},
                              {<<"content-type">>, ?JSON}], C),
     ReqBody = msgpack:pack(Body, [jsx]),
-    Options = [{follow_redirect, true}, {max_redirect, 5}],
-    case hackney:request(Method, URL, ReqHeaders, ReqBody, Options) of
+    case hackney:request(Method, URL, ReqHeaders, ReqBody, ?OPTS) of
         {ok, 200, _H, Ref} ->
             {ok, Body1} = hackney:body(Ref),
-            {ok, Body2} = msgpack:unpack(Body1),
+            {ok, Body2} = msgpack:unpack(Body1, [jsx]),
             {ok, Body2};
-        {ok, 204, _H, _} ->
+        {ok, 204, _H, Ref} ->
+            hackney:body(Ref),
             ok;
-         {ok, Error, _, _} ->
+        {ok, Error, _, Ref} ->
+            hackney:body(Ref),
             {error, Error}
     end.
 
 
-url(["/" | Path], C) ->
+url([$/ | Path], C) ->
     url(Path, C);
 
 url(Path,
@@ -132,13 +147,10 @@ url(Path,
 
 take_last(L) ->
     take_last(L, []).
-
-
 take_last([E], R) ->
     {lists:reverse(R), E};
 take_last([E | R], L) ->
     take_last(R, [E | L]).
-
 
 full_list(L) ->
     list_to_binary(string:join([to_l(E) || E <- L], ",")).
@@ -152,7 +164,7 @@ to_l(E) when is_binary(E) ->
 token_opts(O, #connection{token = undefined}) ->
     O;
 token_opts(O,  #connection{token = Token}) ->
-    [{<<"x-snarl-token">>, Token} | O].
+    [{<<"Authorization">>, <<"Bearer ", Token/binary>>} | O].
 
 new([], C) ->
     C;

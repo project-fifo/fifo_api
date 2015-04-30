@@ -2,3 +2,6 @@
 ebin
 deps
 .eunit
+current_counterexample.eqc
+*.beam
+.eqc-info
