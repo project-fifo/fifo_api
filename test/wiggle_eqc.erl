@@ -25,8 +25,9 @@
 %%%    was not found.
 %%%  - Vm's in the DB being stuck in deleting, when stage changes happen between
 %%%    deleting stage and data being deleted.
-%%%  - State changes as part of the creation process overwriting the 'creating'
-%%%    state leading to situations where a creation looks finished but is not.
+%%%  - The create FSM timing out when the creation of an existing VM takes
+%%%    longer then retries * delay for retries (this isn't a bug but it needs
+%%%    to be set high enough for the test to hold true.
 %%% @end
 %%% Created : 22 Apr 2015 by Heinz Nikolaus Gies <heinz@licenser.net>
 
@@ -324,8 +325,9 @@ cleanup_vms(Admin, Creating) ->
     %% We do it twice to ensure failed vm's are deleted proppelry.
     [wait_for_creation(Admin, VM) || VM <- Creating],
     ensure_empty(Admin, User1, User2, 0).
+
 ensure_empty(_Admin, _User1, _User2, 240) ->
-    {error, timeout}
+    {error, timeout};
 ensure_empty(Admin, User1, User2, I) ->
     {ok, L1} = fifo_vms:list(User1),
     {ok, L2} = fifo_vms:list(User2),
