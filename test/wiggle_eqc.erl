@@ -20,6 +20,13 @@
 %%%  x returning 403 on freshy created VM's from the call returning before
 %%%    permissions could be granted.
 %%%  - A issue with os:cmd when having a too high ulimit (googled)
+%%%    https://github.com/elixir-lang/elixir/issues/2571
+%%%  - a bug that sone zone FSM's on chunter were not shut down when the zone
+%%%    was not found.
+%%%  - Vm's in the DB being stuck in deleting, when stage changes happen between
+%%%    deleting stage and data being deleted.
+%%%  - State changes as part of the creation process overwriting the 'creating'
+%%%    state leading to situations where a creation looks finished but is not.
 %%% @end
 %%% Created : 22 Apr 2015 by Heinz Nikolaus Gies <heinz@licenser.net>
 
@@ -48,6 +55,7 @@
 -define(PACKAGE, [<<"9394cc93-9d1e-4042-9de4-df496622d5bd">>]).
 -define(NETWORK, <<"a3cc7f65-c3e8-4869-a4eb-06cf0c6931cc">>).
 -define(ENDPOINT, "http://192.168.1.41").
+-define(CREATION_CONCURRENCY, 2).
 
 -record(user, {
           id,
@@ -56,16 +64,27 @@
          }).
 
 -record(state,{
+          %% All created VMs in this run
           vms = [],
-          users
+          %% The VM's that are not confirmed done creating
+          creating = [],
+          %% The map of users
+          users,
+          %% connection for the amdin user.
+          admin
          }).
 
 %% @doc Returns the state in which each test case starts. (Unless a different
 %%      initial state is supplied explicitly to, e.g. commands/2.)
 -spec initial_state() -> eqc_statem:symbolic_state().
 initial_state() ->
-    #state{users = maps:from_list([{ID, #user{id = ID}} || 
-                                      ID <- maps:keys(?USERS)])}.
+    #login{login = LoginA, password = PassA} = ?ADMIN,
+    C = fifo_api:new([{endpoint, ?ENDPOINT}]),
+    {ok, Admin} = fifo_api:auth(LoginA, PassA, C),
+    #state{
+       admin = Admin,
+       users = maps:from_list([{ID, #user{id = ID}} ||
+                                  ID <- maps:keys(?USERS)])}.
 
 %% ------ Common pre-/post-conditions
 %% @doc General command filter, checked before a command is generated.
@@ -103,15 +122,61 @@ connect_next(S = #state{users = Users}, C, [UserID]) ->
 connect_post(_S, [_UserID], Res) ->
     is_tuple(Res) andalso element(1, Res) =:= connection.
 
+%% ------ Grouped operator: wait_for_creation
+%% @doc wait_for_creation_callers - Which modules are allowed to call this operation. Default: [anyone]
+
+wait_for_creation_pre(#state{creating = Creating}) ->
+    Creating /= [].
+
+%% @doc wait_for_creation_pre - Precondition for wait_for_creation
+-spec wait_for_creation_pre(S :: eqc_statem:symbolic_state(),
+                            Args :: [term()]) -> boolean().
+wait_for_creation_pre(_S, [_C, _VM]) ->
+    true. %% Condition for S + Args
+
+%% @doc wait_for_creation_args - Argument generator for operation
+-spec wait_for_creation_args(S :: eqc_statem:symbolic_state()) ->
+                                    eqc_gen:gen(term()).
+wait_for_creation_args(#state{admin = Admin, creating = Creating}) ->
+    [Admin, elements(Creating)].
+
+wait_for_creation(C, {UUID, T0}) ->
+    D = timer:now_diff(now(), T0) div 1000000,
+    D1 = max(1, 320 - D),
+    pool_state(C, UUID, D1).
+
+%% @doc wait_for_creation_post - Postcondition for wait_for_creation
+-spec wait_for_creation_post(S :: eqc_statem:dynamic_state(),
+                             Args :: [term()], R :: term()) -> true | term().
+wait_for_creation_post(_S, [_C, _Elem], Res) ->
+    Res == {ok, running}.
+
+%% @doc wait_for_creation_next - Next state function
+-spec wait_for_creation_next(S :: eqc_statem:symbolic_state(),
+                             V :: eqc_statem:var(),
+                             Args :: [term()]) -> eqc_statem:symbolic_state().
+wait_for_creation_next(S = #state{creating = Creating}, _Value, [_C, Elem]) ->
+    S#state{creating = [C || C <- Creating, C /= Elem]}.
+
+wait_for_creation_callouts(_S, [_C, _Elem]) ->
+    ?EMPTY.
+
+%% @doc wait_for_creation_return - Return value for wait_for_creation
+-spec wait_for_creation_return(S :: eqc_statem:symbolic_state(),
+                               Args :: [term()]) -> boolean().
+wait_for_creation_return(_S, [_C, _UUID]) ->
+    ok.
+
 %% ------ Grouped operator: create_vm
 create_vm_args(#state{users = Users}) ->
     [elements([U || U = #user{connection = _C}
                         <- maps:values(Users), _C /= undefined]),
      elements(?PACKAGE), elements(?DATASET)].
 
-create_vm_pre(#state{users = Users, vms = VMs}) ->
+create_vm_pre(#state{users = Users, vms = VMs, creating = Creating}) ->
     [C || #user{connection = C} <- maps:values(Users), C /= undefined] /= []
-        andalso length(VMs) < 5. %% Condition for S
+        andalso length(VMs) < 5
+        andalso length(Creating) =< ?CREATION_CONCURRENCY.
 
 create_vm_pre(_S, [#user{connection = {CID, _}, id = CID}, _Package, _Dataset]) ->
     true;
@@ -124,20 +189,22 @@ create_vm(#user{connection = {_, C}}, Package, Dataset) ->
     Config = [{<<"networks">>, [{<<"net0">>, ?NETWORK}]}],
     {ok, VmData} = fifo_vms:create(Dataset, Package, Config, C),
     {ok, UUID} = jsxd:get(<<"uuid">>, VmData),
-    {ok, running} = pool_state(C, UUID, 320),
-    UUID.
+    {UUID, now()}.
 
 create_vm_callouts(_S, [_C, _Package, _Dataset]) ->
     ?EMPTY.
 
-create_vm_next(S = #state{vms = VMs, users = Users}, UUID,
+create_vm_next(S = #state{vms = VMs, users = Users, creating = Creating}, VM,
                [User = #user{id = ID, vms = UVMs} , _Package, _Dataset]) ->
-    User1 = User#user{vms = [UUID | UVMs]},
+    User1 = User#user{vms = [VM | UVMs]},
     Users1 = maps:update(ID, User1, Users),
-    S#state{vms = [UUID | VMs], users = Users1}.
+    S#state{vms = [VM | VMs], creating = [VM | Creating], users = Users1}.
 
-create_vm_post(_S, [_C, _Package, _Dataset], Res) ->
-    is_binary(Res).
+create_vm_post(_S, [_C, _Package, _Dataset], {Res, _}) ->
+    is_binary(Res);
+
+create_vm_post(_S, [_C, _Package, _Dataset], _Res) ->
+    false.
 
 create_vm_return(_S, [_C, _Package, _Dataset]) ->
     ok.
@@ -165,7 +232,7 @@ list_vms_next(S, _Value, [_User]) ->
     S.
 
 list_vms_post(_S, [#user{vms = VMs1}], VMs2) ->
-    lists:sort(VMs1) == lists:sort(VMs2).
+    lists:sort([UUID || {UUID, _} <- VMs1]) == lists:sort(VMs2).
 
 list_vms_return(_S, [_User]) ->
     ok.
@@ -182,14 +249,15 @@ get_vm_args(#state{users = Users, vms = VMs}) ->
 
 get_vm_pre(_S, [#user{connection = {CID, _}, id = CID}, _VM]) ->
     true;
+
 get_vm_pre(_S, [_User, _VM]) ->
     false.
 
 %%get_vm(#user{connection = {_, C}}, VM) ->
-get_vm(#user{connection = {_, C}}, VM) ->
-    case fifo_vms:get(VM, C) of
+get_vm(#user{connection = {_, C}}, {UUID, _}) ->
+    case fifo_vms:get(UUID, C) of
         {ok, _} ->
-            {ok, VM};
+            {ok, UUID};
         {error, 404} ->
             not_found;
         {error, 403} ->
@@ -221,14 +289,6 @@ get_vm_post(_S, [_, _], {error, _}) ->
 get_vm_return(_S, [_User, _VM]) ->
     ok.
 
-%% ------ ... more operations
-
-%% @doc <i>Optional callback</i>, Invariant, checked for each visited state
-%%      during test execution.
-%% -spec invariant(S :: eqc_statem:dynamic_state()) -> boolean().
-%% invariant(_S) ->
-%%   true.
-
 %% @doc weight/2 - Distribution of calls
 -spec weight(S :: eqc_statem:symbolic_state(), Command :: atom()) -> integer().
 weight(_S, start) -> 1;
@@ -240,29 +300,32 @@ prop_wiggle() ->
     ?SETUP(fun() ->
                    %% setup mocking here
                    fifo_api:start(),
-                   cleanup_vms(),
-                   fun cleanup_vms/0 %% Teardown function
+                   #login{login = LoginA, password = PassA} = ?ADMIN,
+                   C = fifo_api:new([{endpoint, ?ENDPOINT}]),
+                   {ok, Admin} = fifo_api:auth(LoginA, PassA, C),
+                   cleanup_vms(Admin, []),
+                   fun () -> cleanup_vms(Admin, []) end %% Teardown function
            end,
            ?FORALL(Cmds, commands(?MODULE),
                    begin
                        application:ensure_all_started(fifo_api),
                        {H, S, Res} = run_commands(?MODULE,Cmds),
-                       cleanup_vms(),
+                       Res1 = cleanup_vms(S#state.admin, S#state.creating),
                        pretty_commands(?MODULE, Cmds, {H, S, Res},
-                                       Res == ok)
+                                       Res == ok andalso Res1 == ok)
                    end)).
 
-cleanup_vms() ->
-    #login{login = LoginA, password = PassA} = ?ADMIN,
+cleanup_vms(Admin, Creating) ->
     #login{login = Login1, password = Pass1} = ?USER1,
     #login{login = Login2, password = Pass2} = ?USER2,
     C = fifo_api:new([{endpoint, ?ENDPOINT}]),
-    {ok, Admin} = fifo_api:auth(LoginA, PassA, C),
     {ok, User1} = fifo_api:auth(Login1, Pass1, C),
     {ok, User2} = fifo_api:auth(Login2, Pass2, C),
     %% We do it twice to ensure failed vm's are deleted proppelry.
+    [wait_for_creation(Admin, VM) || VM <- Creating],
     ensure_empty(Admin, User1, User2, 0).
-
+ensure_empty(_Admin, _User1, _User2, 240) ->
+    {error, timeout}
 ensure_empty(Admin, User1, User2, I) ->
     {ok, L1} = fifo_vms:list(User1),
     {ok, L2} = fifo_vms:list(User2),
@@ -334,5 +397,6 @@ run_test_() ->
     E1 = [{atom_to_list(N), N} || {N, 0} <- E],
     E2 = [{N, A} || {"prop_" ++ N, A} <- E1],
     [{"Running " ++ N ++ " propperty test",
-      {timeout, ?EQC_EUNIT_TIMEUT, ?_assert(quickcheck(numtests(?EQC_NUM_TESTS,  ?OUT(?MODULE:A()))))}}
+      {timeout, ?EQC_EUNIT_TIMEUT, 
+       ?_assert(quickcheck(numtests(?EQC_NUM_TESTS,  ?OUT(?MODULE:A()))))}}
      || {N, A} <- E2].
