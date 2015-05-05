@@ -92,6 +92,7 @@
           stopped = [],
           deleting = [],
           deleted = [],
+          login_owners = #{},
           %% The map of users
           users,
           %% connection for the amdin user.
@@ -120,6 +121,11 @@ precondition_common(_S, _Call) ->
 %% Grouped operator: connect
 %% -----------------------------------------------------------------------------
 
+%% TODO: The handling of changing connections and associating them with users
+%% is close to impossible, so we 
+%%connect_pre(_) ->
+%% false.
+
 connect_args(#state{users = Users}) ->
     [elements(maps:keys(Users)), elements(?ENDPOINTS)].
 
@@ -132,11 +138,13 @@ connect(UserID, Endpoint) ->
 connect_callouts(_S, [_User, _]) ->
     ?EMPTY.
 
-connect_next(S = #state{users = Users}, C, [UserID, _]) ->
+connect_next(S = #state{users = Users, login_owners = Owners},
+             C, [UserID, _]) ->
     User1 = maps:get(UserID, Users),
-    User2 = User1#user{connection = {UserID, C}},
+    User2 = User1#user{connection = C},
     Users1 = maps:update(UserID, User2, Users),
-    S1 = S#state{users = Users1},
+    Owners1 = maps:put(C, UserID, Owners),
+    S1 = S#state{users = Users1, login_owners = Owners1},
     S1.
 
 connect_post(_S, [_UserID, _], Res) ->
@@ -268,13 +276,11 @@ create_vm_pre(S = #state{users = Users, vms = VMs, creating = Creating}) ->
         andalso length(VMs) < ?MAX_VMS
         andalso length(Creating) =< ?CREATION_CONCURRENCY.
 
-create_vm_pre(_S, [#user{connection = {CID, _}, id = CID}, _Package, _Dataset]) ->
-    true;
+create_vm_pre(#state{login_owners = Owners},
+              [#user{connection = C, id = ID}, _Package, _Dataset]) ->
+    maps:get(C, Owners) == ID.
 
-create_vm_pre(_S, [_User, _Package, _Dataset]) ->
-    false.
-
-create_vm(#user{connection = {_, C}}, Package, Dataset) ->
+create_vm(#user{connection = C}, Package, Dataset) ->
     Config = [{<<"networks">>, [{<<"net0">>, ?NETWORK}]}],
     {ok, VmData} = fifo_vms:create(Dataset, Package, Config, C),
     {ok, UUID} = jsxd:get(<<"uuid">>, VmData),
@@ -292,7 +298,8 @@ create_vm_next(S = #state{vms = VMs, users = Users, creating = Creating}, VM,
 create_vm_post(_S, [_C, _Package, _Dataset], {Res, _}) ->
     is_binary(Res);
 
-create_vm_post(_S, [_C, _Package, _Dataset], _Res) ->
+create_vm_post(_S, [_C, _Package, _Dataset], Res) ->
+    io:format("[crate] Bad result: ~p~n", [Res]),
     false.
 
 %% -----------------------------------------------------------------------------
@@ -311,12 +318,12 @@ list_vms_pre(S = #state{users = Users}) ->
     [C || #user{connection = C} <- maps:values(Users), C /= undefined] /= []
         andalso has_admin(S).
 
-list_vms_pre(_S, [#user{connection = {CID, _}, id = CID}]) ->
-    true;
-list_vms_pre(_S, [_User]) ->
-    false.
 
-list_vms(#user{connection = {_, C}}) ->
+list_vms_pre(#state{login_owners = Owners},
+             [#user{connection = C, id = ID} | _]) ->
+    maps:get(C, Owners) == ID.
+
+list_vms(#user{connection = C}) ->
     {ok, VMs} = fifo_vms:list(C),
     VMs.
 
@@ -346,13 +353,12 @@ get_vm_args(#state{users = Users, vms = VMs}) ->
     [elements([U || U = #user{connection = _C} <- maps:values(Users), _C /= undefined]),
      elements(VMs)].
 
-get_vm_pre(_S, [#user{connection = {CID, _}, id = CID}, _VM]) ->
-    true;
+get_vm_pre(#state{vms = VMs, login_owners = Owners},
+           [#user{connection = C, id = ID}, VM]) ->
+    lists:member(VM, VMs)
+        andalso maps:get(C, Owners) == ID.
 
-get_vm_pre(_S, [_User, _VM]) ->
-    false.
-
-get_vm(#user{connection = {_, C}}, {UUID, _}) ->
+get_vm(#user{connection = C}, {UUID, _}) ->
     case fifo_vms:get(UUID, C) of
         {ok, _} ->
             {ok, UUID};
@@ -370,17 +376,11 @@ get_vm_callouts(_S, [_User, _VM]) ->
 get_vm_next(S, _Value, [_User, _VM]) ->
     S.
 
-get_vm_post(#state{vms = VMs, deleted = Deleted},
-            [_, UUID], not_found) ->
-    lists:member(UUID, Deleted)
-        orelse not lists:member(UUID, VMs);
-
-get_vm_post(#state{vms = VMs, deleted = Deleted},
-            [#user{vms = VMs1}, UUID], forbidden) ->
-    not lists:member(UUID, VMs1)
-        andalso lists:member(UUID, VMs)
-        andalso not lists:member(UUID, Deleted);
-
+get_vm_post(#state{deleted = Deleted, deleting = Deleting},
+            [#user{vms = UVMs}, VM], forbidden) ->
+    not lists:member(VM, UVMs)
+        orelse lists:member(VM, Deleted)
+        orelse lists:member(VM, Deleting);
 
 get_vm_post(_S, [#user{vms = VMs1}, UUID], {ok, _}) ->
     lists:member(UUID, VMs1);
@@ -397,18 +397,16 @@ delete_vm_pre(S = #state{users = Users,
         andalso has_admin(S)
         andalso (Running ++ Stopped) /= [].
 
-delete_vm_pre(_S, [#user{connection = {CID, _}, id = CID, vms = VMs}, VM]) ->
-    lists:member(VM, VMs);
-
-delete_vm_pre(_S, [_, _]) ->
-    false.
-
+delete_vm_pre(#state{login_owners = Owners},
+           [#user{connection = C, id = ID, vms = VMs}, VM]) ->
+    lists:member(VM, VMs)
+        andalso maps:get(C, Owners) == ID.
 
 delete_vm_args(#state{users = Users, running = Running, stopped = Stopped}) ->
     [elements([U || U = #user{connection = _C} <- maps:values(Users), _C /= undefined]),
      elements(Running ++ Stopped)].
 
-delete_vm(#user{connection = {_, C}}, {UUID, _}) ->
+delete_vm(#user{connection = C}, {UUID, _}) ->
     case fifo_vms:delete(UUID, C) of
         ok ->
             {UUID, now()};
@@ -463,18 +461,17 @@ stop_vm_pre(S = #state{users = Users,
         andalso has_admin(S)
         andalso (Running) /= [].
 
-stop_vm_pre(_S, [#user{connection = {CID, _}, id = CID, vms = VMs}, VM, _]) ->
-    lists:member(VM, VMs);
-
-stop_vm_pre(_S, [_, _, _]) ->
-    false.
+stop_vm_pre(#state{login_owners = Owners},
+           [#user{connection = C, id = ID, vms = VMs}, VM, _]) ->
+    lists:member(VM, VMs)
+        andalso maps:get(C, Owners) == ID.
 
 stop_vm_args(#state{users = Users, running = Running}) ->
     [elements([U || U = #user{connection = _C} <- maps:values(Users), _C /= undefined]),
      elements(Running),
      bool()].
 
-stop_vm(#user{connection = {_, C}}, {UUID, _}, Force) ->
+stop_vm(#user{connection = C}, {UUID, _}, Force) ->
     case fifo_vms:stop(UUID, Force, C) of
         ok ->
             {UUID, now()};
@@ -526,17 +523,16 @@ start_vm_pre(S = #state{users = Users,
         andalso has_admin(S)
         andalso (Stopped) /= [].
 
-start_vm_pre(_S, [#user{connection = {CID, _}, id = CID, vms = VMs}, VM]) ->
-    lists:member(VM, VMs);
-
-start_vm_pre(_S, [_, _]) ->
-    false.
+start_vm_pre(#state{login_owners = Owners},
+           [#user{connection = C, id = ID, vms = VMs}, VM]) ->
+    lists:member(VM, VMs)
+        andalso maps:get(C, Owners) == ID.
 
 start_vm_args(#state{users = Users, stopped = Stopped}) ->
     [elements([U || U = #user{connection = _C} <- maps:values(Users), _C /= undefined]),
      elements(Stopped)].
 
-start_vm(#user{connection = {_, C}}, {UUID, _}) ->
+start_vm(#user{connection = C}, {UUID, _}) ->
     case fifo_vms:start(UUID, C) of
         ok ->
             {UUID, now()};
@@ -586,6 +582,7 @@ start_vm_post(_S, [_C, _VM], _) ->
 weight(_S, connect) -> 2;
 weight(_S, list_vms) -> 2;
 weight(_S, get_vm) -> 2;
+weight(_S, create_vm) -> 5;
 weight(_S, _Cmd) -> 10.
 
 %% =============================================================================
@@ -604,12 +601,29 @@ prop_wiggle() ->
            end,
            ?FORALL(Cmds, commands(?MODULE),
                    begin
-
-                       {H, S, Res} = run_commands(?MODULE,Cmds, [{admin, admin()}]),
-
-                       Res1 = cleanup_vms(S#state.admin, S#state.creating, S#state.creating),
-                       pretty_commands(?MODULE, Cmds, {H, S, Res},
-                                       Res == ok andalso Res1 == ok)
+                       {H, S, Res} = run_commands(?MODULE, Cmds,
+                                                  [{admin, admin()}]),
+                       Res1 = cleanup_vms(S#state.admin, S#state.creating,
+                                          S#state.deleting),
+                       Success =
+                           case {Res, Res1} of
+                               {ok, ok} ->
+                                   true;
+                               {_, ok} ->
+                                   io:format("State: ~p~n", [S]),
+                                   io:format("Res: ~p~n", [Res]),
+                                   false;
+                               {ok, _} ->
+                                   io:format("State: ~p~n", [S]),
+                                   io:format("Res1: ~p~n", [Res1]),
+                                   false;
+                               _ ->
+                                   io:format("State: ~p~n", [S]),
+                                   io:format("Res: ~p~n", [Res]),
+                                   io:format("Res1: ~p~n", [Res1]),
+                                   false
+                           end,
+                       pretty_commands(?MODULE, Cmds, {H, S, Res}, Success)
                    end)).
 
 %% =============================================================================
