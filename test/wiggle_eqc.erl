@@ -278,7 +278,7 @@ create_vm_pre(S = #state{users = Users, vms = VMs, creating = Creating}) ->
 
 create_vm_pre(#state{login_owners = Owners},
               [#user{connection = C, id = ID}, _Package, _Dataset]) ->
-    maps:get(C, Owners) == ID.
+    maps:find(C, Owners) == {ok, ID}.
 
 create_vm(#user{connection = C}, Package, Dataset) ->
     Config = [{<<"networks">>, [{<<"net0">>, ?NETWORK}]}],
@@ -321,7 +321,7 @@ list_vms_pre(S = #state{users = Users}) ->
 
 list_vms_pre(#state{login_owners = Owners},
              [#user{connection = C, id = ID} | _]) ->
-    maps:get(C, Owners) == ID.
+    maps:find(C, Owners) == {ok, ID}.
 
 list_vms(#user{connection = C}) ->
     {ok, VMs} = fifo_vms:list(C),
@@ -356,7 +356,7 @@ get_vm_args(#state{users = Users, vms = VMs}) ->
 get_vm_pre(#state{vms = VMs, login_owners = Owners},
            [#user{connection = C, id = ID}, VM]) ->
     lists:member(VM, VMs)
-        andalso maps:get(C, Owners) == ID.
+        andalso maps:find(C, Owners) == {ok, ID}.
 
 get_vm(#user{connection = C}, {UUID, _}) ->
     case fifo_vms:get(UUID, C) of
@@ -382,6 +382,13 @@ get_vm_post(#state{deleted = Deleted, deleting = Deleting},
         orelse lists:member(VM, Deleted)
         orelse lists:member(VM, Deleting);
 
+get_vm_post(#state{deleted = Deleted, deleting = Deleting},
+            [#user{vms = UVMs}, VM], not_found) ->
+
+    not lists:member(VM, UVMs)
+        orelse lists:member(VM, Deleted)
+        orelse lists:member(VM, Deleting);
+
 get_vm_post(_S, [#user{vms = VMs1}, UUID], {ok, _}) ->
     lists:member(UUID, VMs1);
 
@@ -400,7 +407,7 @@ delete_vm_pre(S = #state{users = Users,
 delete_vm_pre(#state{login_owners = Owners},
            [#user{connection = C, id = ID, vms = VMs}, VM]) ->
     lists:member(VM, VMs)
-        andalso maps:get(C, Owners) == ID.
+        andalso maps:find(C, Owners) == {ok, ID}.
 
 delete_vm_args(#state{users = Users, running = Running, stopped = Stopped}) ->
     [elements([U || U = #user{connection = _C} <- maps:values(Users), _C /= undefined]),
@@ -464,7 +471,7 @@ stop_vm_pre(S = #state{users = Users,
 stop_vm_pre(#state{login_owners = Owners},
            [#user{connection = C, id = ID, vms = VMs}, VM, _]) ->
     lists:member(VM, VMs)
-        andalso maps:get(C, Owners) == ID.
+        andalso maps:find(C, Owners) == {ok, ID}.
 
 stop_vm_args(#state{users = Users, running = Running}) ->
     [elements([U || U = #user{connection = _C} <- maps:values(Users), _C /= undefined]),
@@ -526,7 +533,7 @@ start_vm_pre(S = #state{users = Users,
 start_vm_pre(#state{login_owners = Owners},
            [#user{connection = C, id = ID, vms = VMs}, VM]) ->
     lists:member(VM, VMs)
-        andalso maps:get(C, Owners) == ID.
+        andalso maps:find(C, Owners) == {ok, ID}.
 
 start_vm_args(#state{users = Users, stopped = Stopped}) ->
     [elements([U || U = #user{connection = _C} <- maps:values(Users), _C /= undefined]),
