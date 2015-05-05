@@ -121,7 +121,7 @@ delete(UUID, C) ->
 -spec start(UUID :: binary(), fifo_api:connection()) ->
                    ok.
 start(UUID, C) ->
-    URL = [?ENDPOINT, $/, UUID],
+    URL = [?ENDPOINT, $/, UUID, $/, <<"state">>],
     Body = [{<<"action">>, <<"start">>}],
     fifo_api_http:put(URL, Body, C).
 
@@ -133,12 +133,12 @@ start(UUID, C) ->
 -spec stop(UUID :: binary(), Force :: boolean(), fifo_api:connection()) ->
                    ok.
 stop(UUID, false, C) ->
-    URL = [?ENDPOINT, $/, UUID],
+    URL = [?ENDPOINT, $/, UUID, $/, <<"state">>],
     Body = [{<<"action">>, <<"stop">>}],
     fifo_api_http:put(URL, Body, C);
 
 stop(UUID, true, C) ->
-    URL = [?ENDPOINT, $/, UUID],
+    URL = [?ENDPOINT, $/, UUID, $/, <<"state">>],
     Body = [{<<"action">>, <<"stop">>}, {<<"force">>, true}],
     fifo_api_http:put(URL, Body, C).
 
@@ -150,12 +150,12 @@ stop(UUID, true, C) ->
 -spec reboot(UUID :: binary(), Force :: boolean(), fifo_api:connection()) ->
                    ok.
 reboot(UUID, false, C) ->
-    URL = [?ENDPOINT, $/, UUID],
+    URL = [?ENDPOINT, $/, UUID, $/, <<"state">>],
     Body = [{<<"action">>, <<"reboot">>}],
     fifo_api_http:put(URL, Body, C);
 
 reboot(UUID, true, C) ->
-    URL = [?ENDPOINT, $/, UUID],
+    URL = [?ENDPOINT, $/, UUID, $/, <<"state">>],
     Body = [{<<"action">>, <<"reboot">>}, {<<"force">>, true}],
     fifo_api_http:put(URL, Body, C).
 
