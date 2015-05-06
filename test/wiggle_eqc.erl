@@ -36,6 +36,9 @@
 %%%    forbidden errors
 %%%  - When requiering decoding during the forbidden phase content was always
 %%%    decoded as JOSN.
+%%%  - A bug introduced by caching of token permissions:
+%%%      -> A programmer has a problem and uses a cache to solve it, now they
+%%%         have two problems.
 %%% @end
 %%% Created : 22 Apr 2015 by Heinz Nikolaus Gies <heinz@licenser.net>
 
@@ -71,7 +74,6 @@
 -define(STOP_TIMEOUT, 60).
 -define(DELETE_TIMEOUT, 60).
 -define(MAX_VMS, 5).
-
 
 -record(user, {
           id,
@@ -298,8 +300,7 @@ create_vm_next(S = #state{vms = VMs, users = Users, creating = Creating}, VM,
 create_vm_post(_S, [_C, _Package, _Dataset], {Res, _}) ->
     is_binary(Res);
 
-create_vm_post(_S, [_C, _Package, _Dataset], Res) ->
-    io:format("[crate] Bad result: ~p~n", [Res]),
+create_vm_post(_S, [_C, _Package, _Dataset], _Res) ->
     false.
 
 %% -----------------------------------------------------------------------------
