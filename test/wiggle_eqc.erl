@@ -5,7 +5,7 @@
 %%%  x "/" instead of $/ in fifo_api_http:url
 %%%  x extra / in urls'f in fifo_vm calls
 %%%  x blockage of hackney when not reading the body of replies
-%%%  - deleting a vm needs to delete the create fms too.
+%%%  x deleting a vm needs to delete the create fms too.
 %%%  x Timeout issues due to long bcrypt password checks.
 %%%  x Encoding error trying to encode a tuple with atom_to_binary in oauth
 %%%    error responses
@@ -31,14 +31,18 @@
 %%%  x Issue with closing a port that did not provide a pid was crashing the
 %%     FSM.
 %%%  x An unhandled error on connection failures.
-%%%  - Timeout on lock server
-%%%  - unregister needs to happen as fist event in the vm destruction to prevent
+%%%  x Timeout on lock server
+%%%  x unregister needs to happen as fist event in the vm destruction to prevent
 %%%    forbidden errors
-%%%  - When requiering decoding during the forbidden phase content was always
+%%%  x When requiering decoding during the forbidden phase content was always
 %%%    decoded as JOSN.
-%%%  - A bug introduced by caching of token permissions:
+%%%  x A bug introduced by caching of token permissions:
 %%%      -> A programmer has a problem and uses a cache to solve it, now they
 %%%         have two problems.
+%%%  x Problem with systems being stuck in shutting down.
+%%%      -> Timing issue with chunter not re-reading the state before
+%%%         updating it leading to possible race codintions with multiple
+%%%         endpoints.
 %%% @end
 %%% Created : 22 Apr 2015 by Heinz Nikolaus Gies <heinz@licenser.net>
 
@@ -618,16 +622,11 @@ prop_wiggle() ->
                                {ok, ok} ->
                                    true;
                                {_, ok} ->
-                                   io:format("State: ~p~n", [S]),
-                                   io:format("Res: ~p~n", [Res]),
                                    false;
                                {ok, _} ->
-                                   io:format("State: ~p~n", [S]),
                                    io:format("Res1: ~p~n", [Res1]),
                                    false;
                                _ ->
-                                   io:format("State: ~p~n", [S]),
-                                   io:format("Res: ~p~n", [Res]),
                                    io:format("Res1: ~p~n", [Res1]),
                                    false
                            end,
@@ -683,14 +682,17 @@ pool_state(_, _, _, 0) ->
 pool_state(C, UUID, Req, L) ->
     case fifo_vms:get(UUID, C) of
         {ok, VM} ->
-            case jsxd:get(<<"state">>, VM) of
-                {ok, <<"running">>} when Req == running ->
+            case {jsxd:get(<<"creating">>, VM), jsxd:get(<<"state">>, VM)} of
+                {{ok, true}, _} ->
+                    timer:sleep(1000),
+                    wiggle_eqc:pool_state(C, UUID, Req, L - 1);
+                {_, {ok, <<"running">>}} when Req == running ->
                     ok;
-                {ok, <<"stopped">>} when Req == stopped ->
+                {_, {ok, <<"stopped">>}} when Req == stopped ->
                     ok;
-                {ok, <<"failed">>} ->
+                {_, {ok, <<"failed">>}} ->
                     {error, failed};
-                {ok, _State} ->
+                {_, {ok, _State}} ->
                     timer:sleep(1000),
                     wiggle_eqc:pool_state(C, UUID, Req, L - 1)
             end;
