@@ -43,6 +43,8 @@
 %%%      -> Timing issue with chunter not re-reading the state before
 %%%         updating it leading to possible race codintions with multiple
 %%%         endpoints.
+%%%  x newly introduced but matching for a wrong value when a vm was
+%%%    supposed to be deletd while the creation phase was still ongoing.
 %%% @end
 %%% Created : 22 Apr 2015 by Heinz Nikolaus Gies <heinz@licenser.net>
 
@@ -676,7 +678,12 @@ ensure_empty(Admin, User1, User2, Deleting, I) ->
 -spec api_spec() -> #api_spec{}.
 api_spec() -> #api_spec{ language = erlang, mocking = eqc_mocking, modules = [] }.
 
-pool_state(_, _, _, 0) ->
+pool_state(_C, _UUID, _Req, 0) ->
+    %% {ok, VM} = fifo_vms:get(UUID, C),
+    %% {ok, Creating} = jsxd:get(<<"creating">>, VM),
+    %% {ok, State} = jsxd:get(<<"state">>, VM),
+    %% io:format(user, "[~s:~s] timeout: ~s/~s~n", [UUID, Req, State, Creating]),
+    %% erlang:halt(),
     {error, timeout};
 
 pool_state(C, UUID, Req, L) ->
@@ -699,6 +706,8 @@ pool_state(C, UUID, Req, L) ->
         {error, 404} when Req == deleted ->
             ok
     end.
+
+%% This should be imported via fqc.hrl but the import has some issues
 
 -define(OUT(P),
         on_output(fun
