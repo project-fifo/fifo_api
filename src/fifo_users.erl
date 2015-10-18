@@ -70,20 +70,28 @@ get(UUID, C) ->
                   {ok, Token :: binary()}.
 
 auth(Login, Pass, C) ->
-    Body = [{<<"username">>, Login}, {<<"password">>, Pass},
-            {<<"grant_type">>, <<"password">>}],
-    Method = post,
+    L1 = list_to_binary(http_uri:encode(binary_to_list(Login))),
+    P1 = list_to_binary(http_uri:encode(binary_to_list(Pass))),
+    ReqBody = <<"username=", L1/binary,"&password=", P1/binary, "&grant_type=password">>,
     URL = fifo_api_http:url("oauth/token", C),
     ReqHeaders = [{<<"accept-encoding">>, <<"application/json">>},
                   {<<"content-type">>, <<"application/x-www-form-urlencoded">>}],
-    case hackney:request(Method, URL, ReqHeaders, {form, Body}, [{timeout, 5000}]) of
-        {ok, 200, _H, Ref} ->
-            {ok, Body1} = hackney:body(Ref),
-            Body2 = jsx:decode(Body1),
-            jsxd:get(<<"access_token">>, Body2);
-         {ok, Error, _, _} ->
-            {error, Error}
+    ConnPid = fifo_api_http:connect(C),
+    StreamRef = gun:post(ConnPid, URL, ReqHeaders),
+    gun:data(ConnPid, StreamRef, fin, ReqBody),
+    case gun:await(ConnPid, StreamRef) of
+        {response, fin, 200, _Hdrs}  ->
+            fifo_api_http:close(ConnPid),
+            {error, no_login};
+        {response, nofin, 200, _Hdrs} ->
+            {ok, Body1} = gun:await_body(ConnPid, StreamRef),
+            fifo_api_http:close(ConnPid),
+            jsxd:get(<<"access_token">>, jsx:decode(Body1));
+        Error ->
+            fifo_api_http:close(ConnPid),
+            Error
     end.
+
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -93,7 +101,7 @@ auth(Login, Pass, C) ->
 
 -spec add_sshkey(UUID :: binary(), KeyID :: binary(), Key :: binary(),
                  fifo_api_http:connection()) ->
-    ok.
+                        ok.
 
 add_sshkey(UUID, KeyID, Key, C) ->
     URL = [?ENDPOINT, $/, UUID, "/keys"],
@@ -109,7 +117,7 @@ add_sshkey(UUID, KeyID, Key, C) ->
 
 -spec delete_sshkey(UUID :: binary(), KeyID :: binary(),
                     fifo_api_http:connection()) ->
-    ok.
+                           ok.
 
 delete_sshkey(UUID, KeyID, C) ->
     URL = [?ENDPOINT, $/, UUID, "/keys/", KeyID],

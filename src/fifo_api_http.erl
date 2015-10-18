@@ -9,21 +9,23 @@
 -module(fifo_api_http).
 
 -export([new/1, get/2, get/3, post/3, put/3, set_token/2, url/2,
-        delete/2, delete/3]).
+        delete/2, delete/3, connect/1, close/1]).
 
 -export([take_last/1, full_list/1]).
 
 -export_type([connection/0, connection_options/0]).
 
 -record(connection, {
-          endpoint = "http://localhost" :: string(),
+          endpoint = "localhost" :: string(),
+          port = 80 :: pos_integer(),
           prefix = "api" :: string(),
-          version = "0.2.0" :: string(),
+          version = "2" :: string(),
           token :: binary() | undefined
          }).
 
 -type connection_options() ::
         {endpoint, string()} |
+        {port, pos_integer()} |
         {prefix, string()} |
         {token, binary()} |
         {version, string()}.
@@ -33,19 +35,16 @@
 -define(MSGPACK,  <<"application/x-msgpack">>).
 -define(JSON,  <<"application/json">>).
 
--define(POOL, fifo).
--define(MIN_OPTS, [{timeout, 5000}, {pool, ?POOL}]).
--define(OPTS, [{follow_redirect, true}, {max_redirect, 5} | ?MIN_OPTS]).
-
 new(Options) ->
-    case hackney_pool:find_pool(?POOL) of
-        undefined ->
-            PoolOpts = [{timeout, 5000}, {max_connections, 50}],
-            ok = hackney_pool:start_pool(?POOL, PoolOpts);
-        _ ->
-            ok
-    end,
     new(Options, #connection{}).
+
+connect(#connection{endpoint = Endpoint, port = Port}) ->
+    {ok, ConnPid} = gun:open(Endpoint, Port),
+    {ok, _} = gun:await_up(ConnPid),
+    ConnPid.
+
+close(ConnPid) ->
+    gun:close(ConnPid).
 
 set_token(Token, C) ->
     C#connection{token = Token}.
@@ -57,93 +56,121 @@ delete(Path, C) ->
     delete(Path, [], C).
 
 get(Path, Opts, C) ->
-    Method = get,
-    URL = url(Path, C),
-    ReqHeaders = token_opts([{<<"accept-encoding">>, ?MSGPACK} | Opts], C),
-    ReqBody = <<>>,
-    case hackney:request(Method, URL, ReqHeaders, ReqBody, ?OPTS) of
-        {ok, 200, _H, Ref} ->
-            {ok, Body1} = hackney:body(Ref),
-            {ok, Body2} = msgpack:unpack(Body1, [jsx]),
-            {ok, Body2};
-         {ok, Error, _, Ref} ->
-            hackney:body(Ref),
-            {error, Error}
-    end.
+    get_(url(Path, C), Opts, C).
 
+get_(URL, C) ->
+    get_(URL, [], C).
+
+get_(URL, Opts, C) ->
+    ConnPid = connect(C),
+    ReqHeaders = token_opts([{<<"accept-encoding">>, ?MSGPACK} | Opts], C),
+    StreamRef = gun:get(ConnPid, URL, ReqHeaders),
+    case gun:await(ConnPid, StreamRef) of
+        {response, fin, Code, _Hdrs} when Code >= 400 ->
+            gun:close(ConnPid),
+            {error, Code};
+        {response, nofin, _Status, _Hdrs} ->
+            {ok, Body1} = gun:await_body(ConnPid, StreamRef),
+            {ok, Body2} = msgpack:unpack(Body1, [jsx]),
+            gun:close(ConnPid),
+            {ok, Body2};
+        E ->
+            gun:close(ConnPid),
+            E
+    end.
 
 delete(Path, Opts, C) ->
-    Method = delete,
+    ConnPid = connect(C),
     URL = url(Path, C),
     ReqHeaders = token_opts([{<<"accept-encoding">>, ?MSGPACK} | Opts], C),
-    ReqBody = <<>>,
-    case hackney:request(Method, URL, ReqHeaders, ReqBody, ?OPTS) of
-        {ok, 200, _H, Ref} ->
-            {ok, Body1} = hackney:body(Ref),
-            {ok, Body2} = msgpack:unpack(Body1, [jsx]),
-            {ok, Body2};
-        {ok, 204, _H, Ref} ->
-            hackney:body(Ref),
+    StreamRef = gun:delete(ConnPid, URL, ReqHeaders),
+    case gun:await(ConnPid, StreamRef) of
+        {response, fin, Code, _Hdrs} when Code >= 400 ->
+            gun:close(ConnPid),
+            {error, Code};
+        {response, fin, _Status, _Hdrs} ->
+            gun:close(ConnPid),
             ok;
-        {ok, Error, _, Ref} ->
-            hackney:body(Ref),
-            {error, Error}
+        {response, nofin, _Status, _Hdrs} ->
+            {ok, Body1} = gun:await_body(ConnPid, StreamRef),
+            {ok, Body2} = msgpack:unpack(Body1, [jsx]),
+            gun:close(ConnPid),
+            {ok, Body2};
+        E ->
+            gun:close(ConnPid),
+            E
     end.
 
-post(Path, Body, C = #connection{endpoint = Endpoint}) ->
-    Method = post,
+post(Path, Body, C) ->
+    ConnPid = connect(C),
     URL = url(Path, C),
     ReqHeaders = token_opts([{<<"accept-encoding">>, ?MSGPACK},
                              {<<"content-type">>, ?MSGPACK}], C),
     ReqBody = msgpack:pack(Body, [jsx]),
-    case hackney:request(Method, URL, ReqHeaders, ReqBody, ?MIN_OPTS) of
-        {ok, 200, _H, Ref} ->
-            {ok, Body1} = hackney:body(Ref),
+    StreamRef = gun:post(ConnPid, URL, ReqHeaders),
+    gun:data(ConnPid, StreamRef, fin, ReqBody),
+    case gun:await(ConnPid, StreamRef) of
+        {response, fin, Code, _Hdrs} when Code >= 400 ->
+            gun:close(ConnPid),
+            {error, Code};
+        {response, fin, 200, _Hdrs}  ->
+            gun:close(ConnPid),
+            ok;
+        {response, _, 204, _Hdrs}  ->
+            gun:close(ConnPid),
+            ok;
+        {response, nofin, 200, _Hdrs} ->
+            {ok, Body1} = gun:await_body(ConnPid, StreamRef),
             {ok, Body2} = msgpack:unpack(Body1, [jsx]),
+            gun:close(ConnPid),
             {ok, Body2};
-        {ok, 303, H, Ref} ->
-            hackney:body(Ref),
+        {response, fin, 303, H} ->
             Location = proplists:get_value(<<"location">>, H),
-            case hackney:request(get, [Endpoint, Location],
-                                 ReqHeaders, ReqBody, []) of
-                {ok, 200, _H, Ref1} ->
-                    {ok, Body1} = hackney:body(Ref1),
-                    {ok, Body2} = msgpack:unpack(Body1, [jsx]),
-                    {ok, Body2};
-                {ok, Error, _, Ref1} ->
-                    hackney:body(Ref1),
-                    {error, Error}
-            end;
+            gun:close(ConnPid),
+            get_(Location, C);
         Error ->
-            {error, Error}
+            gun:close(ConnPid),
+            Error
     end.
 
 put(Path, Body, C) ->
-    Method = put,
+    ConnPid = connect(C),
     URL = url(Path, C),
     ReqHeaders = token_opts([{<<"accept-encoding">>, ?MSGPACK},
-                             {<<"content-type">>, ?JSON}], C),
+                             {<<"content-type">>, ?MSGPACK}], C),
     ReqBody = msgpack:pack(Body, [jsx]),
-    case hackney:request(Method, URL, ReqHeaders, ReqBody, ?OPTS) of
-        {ok, 200, _H, Ref} ->
-            {ok, Body1} = hackney:body(Ref),
-            {ok, Body2} = msgpack:unpack(Body1, [jsx]),
-            {ok, Body2};
-        {ok, 204, _H, Ref} ->
-            hackney:body(Ref),
+    StreamRef = gun:put(ConnPid, URL, ReqHeaders),
+    gun:data(ConnPid, StreamRef, fin, ReqBody),
+    case gun:await(ConnPid, StreamRef) of
+        {response, fin, Code, _Hdrs} when Code >= 400 ->
+            gun:close(ConnPid),
+            {error, Code};
+        {response, fin, 200, _Hdrs}  ->
+            gun:close(ConnPid),
             ok;
-        {ok, Error, _, Ref} ->
-            hackney:body(Ref),
-            {error, Error}
+        {response, _, 204, _Hdrs}  ->
+            gun:close(ConnPid),
+            ok;
+        {response, nofin, 200, _Hdrs} ->
+            {ok, Body1} = gun:await_body(ConnPid, StreamRef),
+            {ok, Body2} = msgpack:unpack(Body1, [jsx]),
+            gun:close(ConnPid),
+            {ok, Body2};
+        {response, fin, 303, H} ->
+            Location = proplists:get_value(<<"location">>, H),
+            gun:close(ConnPid),
+            get_(Location, C);
+        Error ->
+            gun:close(ConnPid),
+            Error
     end.
-
 
 url([$/ | Path], C) ->
     url(Path, C);
 
 url(Path,
-    #connection{endpoint = Endpoint, prefix = Prefix, version = Version}) ->
-    [Endpoint, $/, Prefix, $/, Version, $/, Path].
+    #connection{prefix = Prefix, version = Version}) ->
+    [$/, Prefix, $/, Version, $/, Path].
 
 take_last(L) ->
     take_last(L, []).

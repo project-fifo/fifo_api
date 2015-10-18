@@ -11,7 +11,7 @@
 start() ->
     application:ensure_all_started(fifo_api).
 
--spec new(Options :: fifo_api_http:con_options())  ->
+-spec new(Options :: [fifo_api_http:con_options()])  ->
                  fifo_api_http:connection().
 
 new(Options) ->

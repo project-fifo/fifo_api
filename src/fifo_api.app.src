@@ -8,7 +8,7 @@
   {registered, []},
   {applications, [
                   lager,
-                  hackney,
+                  gun,
                   jsx,
                   kernel,
                   stdlib

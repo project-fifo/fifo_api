@@ -68,11 +68,11 @@
           user1 => ?USER1,
           user2 => ?USER2
          }).
--define(DATASET, [<<"75d1b5d8-e509-11e4-a51f-2fd538c62d87">>]).
--define(PACKAGE, [<<"c009ae95-d893-440e-b3f9-abd40d5f4d4a">>]).
--define(NETWORK, <<"b524adbf-9605-4c28-9129-8173f405334e">>).
--define(ENDPOINT, "http://192.168.1.41").
--define(ENDPOINTS, ["http://192.168.1.41", "http://192.168.1.42"]).
+-define(DATASET, [<<"b67492c2-055c-11e5-85d8-8b039ac981ec">>]).
+-define(PACKAGE, [<<"42bf38f3-5632-49cb-82ce-973a04c3a8f6">>]).
+-define(NETWORK, <<"faa25949-e8a2-446f-b01a-ddf17f058016">>).
+-define(ENDPOINT, "192.168.1.41").
+-define(ENDPOINTS, ["192.168.1.41", "192.168.1.42"]).
 -define(CREATION_CONCURRENCY, 2).
 
 -define(CREATE_TIMEOUT, 320).
@@ -80,6 +80,7 @@
 -define(STOP_TIMEOUT, 60).
 -define(DELETE_TIMEOUT, 60).
 -define(MAX_VMS, 5).
+-define(R(C), fifo_api_http:reset(C)).
 
 -record(user, {
           id,
@@ -138,13 +139,11 @@ connect_args(#state{users = Users}) ->
     [elements(maps:keys(Users)), elements(?ENDPOINTS)].
 
 connect(UserID, Endpoint) ->
-    #login{login = Login, password = Pass} = maps:get(UserID, ?USERS),
+    #login{login = Login, password = Pass} =
+        maps:get(UserID, ?USERS),
     C = fifo_api:new([{endpoint, Endpoint}]),
     {ok, C1} = fifo_api:auth(Login, Pass, C),
     C1.
-
-connect_callouts(_S, [_User, _]) ->
-    ?EMPTY.
 
 connect_next(S = #state{users = Users, login_owners = Owners},
              C, [UserID, _]) ->
@@ -173,15 +172,12 @@ wait_for_creation_args(#state{admin = Admin, creating = Creating}) ->
     [Admin, elements(Creating)].
 
 wait_for_creation(C, {UUID, T0}) ->
-    D = timer:now_diff(now(), T0) div 1000000,
+    D = erlang:system_time(seconds) -  T0,
     D1 = max(1, ?CREATE_TIMEOUT - D),
-    pool_state(C, UUID, running, D1).
+    pool_state(C, UUID, running, D1*2).
 
 wait_for_creation_post(_S, [_C, _Elem], Res) ->
     Res == ok.
-
-wait_for_creation_callouts(_S, [_C, _Elem]) ->
-    ?EMPTY.
 
 wait_for_creation_next(S = #state{creating = Creating, running = Running},
                        _Value, [_C, Elem]) ->
@@ -199,15 +195,12 @@ wait_for_delete_args(#state{admin = Admin, deleting = Deleting}) ->
     [Admin, elements(Deleting)].
 
 wait_for_delete(C, {UUID, T0}) ->
-    D = timer:now_diff(now(), T0) div 1000000,
+    D = erlang:system_time(seconds) - T0,
     D1 = max(1, ?DELETE_TIMEOUT - D),
-    pool_state(C, UUID, deleted, D1).
+    pool_state(C, UUID, deleted, D1*2).
 
 wait_for_delete_post(_S, [_C, _Elem], Res) ->
     Res == ok.
-
-wait_for_delete_callouts(_S, [_C, _Elem]) ->
-    ?EMPTY.
 
 wait_for_delete_next(S = #state{deleting = Deleting, deleted = Deleted},
                      _Value, [_C, Elem]) ->
@@ -225,15 +218,12 @@ wait_for_start_args(#state{admin = Admin, starting = Starting}) ->
     [Admin, elements(Starting)].
 
 wait_for_start(C, {UUID, T0}) ->
-    D = timer:now_diff(now(), T0) div 1000000,
+    D = erlang:system_time(seconds) - T0,
     D1 = max(1, ?START_TIMEOUT - D),
-    pool_state(C, UUID, running, D1).
+    pool_state(C, UUID, running, D1*2).
 
 wait_for_start_post(_S, [_C, _Elem], Res) ->
     Res == ok.
-
-wait_for_start_callouts(_S, [_C, _Elem]) ->
-    ?EMPTY.
 
 wait_for_start_next(S = #state{starting = Starting, running = Running},
                     _Value, [_C, Elem]) ->
@@ -251,15 +241,12 @@ wait_for_stop_args(#state{admin = Admin, stopping = Stopping}) ->
     [Admin, elements(Stopping)].
 
 wait_for_stop(C, {UUID, T0}) ->
-    D = timer:now_diff(now(), T0) div 1000000,
+    D = erlang:system_time(seconds) - T0,
     D1 = max(1, ?STOP_TIMEOUT - D),
-    pool_state(C, UUID, stopped, D1).
+    pool_state(C, UUID, stopped, D1*2).
 
 wait_for_stop_post(_S, [_C, _Elem], Res) ->
     Res == ok.
-
-wait_for_stop_callouts(_S, [_C, _Elem]) ->
-    ?EMPTY.
 
 wait_for_stop_next(S = #state{stopping = Stopping, stopped = Stopped},
                    _Value, [_C, Elem]) ->
@@ -292,16 +279,14 @@ create_vm(#user{connection = C}, Package, Dataset) ->
     Config = [{<<"networks">>, [{<<"net0">>, ?NETWORK}]}],
     {ok, VmData} = fifo_vms:create(Dataset, Package, Config, C),
     {ok, UUID} = jsxd:get(<<"uuid">>, VmData),
-    {UUID, now()}.
-
-create_vm_callouts(_S, [_C, _Package, _Dataset]) ->
-    ?EMPTY.
+    {UUID, erlang:system_time(seconds)}.
 
 create_vm_next(S = #state{vms = VMs, users = Users, creating = Creating}, VM,
                [User = #user{id = ID, vms = UVMs} , _Package, _Dataset]) ->
     User1 = User#user{vms = [VM | UVMs]},
     Users1 = maps:update(ID, User1, Users),
-    S#state{vms = [VM | VMs], creating = [VM | Creating], users = Users1}.
+    S1 = S#state{vms = [VM | VMs], creating = [VM | Creating], users = Users1},
+    S1.
 
 create_vm_post(_S, [_C, _Package, _Dataset], {Res, _}) ->
     is_binary(Res);
@@ -334,9 +319,6 @@ list_vms(#user{connection = C}) ->
     {ok, VMs} = fifo_vms:list(C),
     VMs.
 
-list_vms_callouts(_S, [_User]) ->
-    ?EMPTY.
-
 list_vms_post(#state{deleted = Deleted, deleting = Deleting},
               [#user{vms = UVMs}], VMs) ->
     UVMs1 = (UVMs -- Deleted) -- Deleting,
@@ -360,9 +342,12 @@ get_vm_args(#state{users = Users, vms = VMs}) ->
     [elements([U || U = #user{connection = _C} <- maps:values(Users), _C /= undefined]),
      elements(VMs)].
 
-get_vm_pre(#state{vms = VMs, login_owners = Owners},
+get_vm_pre(#state{users = Users, vms = VMs, login_owners = Owners},
            [#user{connection = C, id = ID}, VM]) ->
+    UserVMs = [UVMs || #user{vms = UVMs} <- maps:values(Users)],
+    UserVMs1 = lists:flatten(UserVMs),
     lists:member(VM, VMs)
+        andalso lists:member(VM, UserVMs1)
         andalso maps:find(C, Owners) == {ok, ID}.
 
 get_vm(#user{connection = C}, {UUID, _}) ->
@@ -377,9 +362,6 @@ get_vm(#user{connection = C}, {UUID, _}) ->
             E
     end.
 
-get_vm_callouts(_S, [_User, _VM]) ->
-    ?EMPTY.
-
 get_vm_next(S, _Value, [_User, _VM]) ->
     S.
 
@@ -391,7 +373,6 @@ get_vm_post(#state{deleted = Deleted, deleting = Deleting},
 
 get_vm_post(#state{deleted = Deleted, deleting = Deleting},
             [#user{vms = UVMs}, VM], not_found) ->
-
     not lists:member(VM, UVMs)
         orelse lists:member(VM, Deleted)
         orelse lists:member(VM, Deleting);
@@ -423,7 +404,7 @@ delete_vm_args(#state{users = Users, running = Running, stopped = Stopped}) ->
 delete_vm(#user{connection = C}, {UUID, _}) ->
     case fifo_vms:delete(UUID, C) of
         ok ->
-            {UUID, now()};
+            {UUID, erlang:system_time(seconds)};
         {error, 404} ->
             not_found;
         {error, 403} ->
@@ -456,9 +437,6 @@ delete_vm_next(S = #state{deleting = Deleting,
       deleting = [New | Deleting]
      }.
 
-delete_vm_callouts(_S, [_C, _VM]) ->
-    ?EMPTY.
-
 delete_vm_post(_S, [_C, _VM], {_, _}) ->
     true;
 
@@ -488,7 +466,7 @@ stop_vm_args(#state{users = Users, running = Running}) ->
 stop_vm(#user{connection = C}, {UUID, _}, Force) ->
     case fifo_vms:stop(UUID, Force, C) of
         ok ->
-            {UUID, now()};
+            {UUID, erlang:system_time(seconds)};
         {error, 404} ->
             not_found;
         {error, 403} ->
@@ -519,9 +497,6 @@ stop_vm_next(S = #state{stopping = Stopping,
       stopping = [New | Stopping]
      }.
 
-stop_vm_callouts(_S, [_C, _VM, _Force]) ->
-    ?EMPTY.
-
 stop_vm_post(_S, [_C, _VM, _Force], {_, _}) ->
     true;
 
@@ -549,7 +524,7 @@ start_vm_args(#state{users = Users, stopped = Stopped}) ->
 start_vm(#user{connection = C}, {UUID, _}) ->
     case fifo_vms:start(UUID, C) of
         ok ->
-            {UUID, now()};
+            {UUID, erlang:system_time(seconds)};
         {error, 404} ->
             not_found;
         {error, 403} ->
@@ -579,9 +554,6 @@ start_vm_next(S = #state{starting = Starting,
       %% Add the element to deleting
       starting = [New | Starting]
      }.
-
-start_vm_callouts(_S, [_C, _VM]) ->
-    ?EMPTY.
 
 start_vm_post(_S, [_C, _VM], {_, _}) ->
     true;
@@ -656,7 +628,7 @@ cleanup_vms(Admin, Creating, Deleting) ->
     Deleting1 = [UUID || {UUID, _} <- Deleting],
     ensure_empty(Admin, User1, User2, Deleting1, 0).
 
-ensure_empty(_Admin, _User1, _User2, _Deleting, 240) ->
+ensure_empty(_Admin, _User1, _User2, _Deleting, 480) ->
     {error, timeout};
 ensure_empty(Admin, User1, User2, Deleting, I) ->
     {ok, L1} = fifo_vms:list(User1),
@@ -666,24 +638,35 @@ ensure_empty(Admin, User1, User2, Deleting, I) ->
             ok;
         UUIDs when I == 0 ->
             UUIDs1 = UUIDs -- Deleting,
-            [ok = fifo_vms:delete(UUID, Admin) || UUID <- UUIDs1],
-            timer:sleep(1000),
+            [case fifo_vms:delete(UUID, Admin) of
+                 ok ->
+                     ok;
+                 {error, 423} ->
+                     %% We have a locked VM that is icky!
+                     %% need to wait this out :/
+                     timer:sleep(30000);
+                 _ ->
+                     ok = fifo_vms:delete(UUID, Admin)
+             end || UUID <- UUIDs1],
+            timer:sleep(500),
             ensure_empty(Admin, User1, User2, Deleting, I + 1);
         _ ->
-            timer:sleep(1000),
+            timer:sleep(500),
             ensure_empty(Admin, User1, User2, Deleting, I + 1)
     end.
+
 
 %% @doc API specification for mocked components
 -spec api_spec() -> #api_spec{}.
 api_spec() -> #api_spec{ language = erlang, mocking = eqc_mocking, modules = [] }.
 
-pool_state(_C, _UUID, _Req, 0) ->
+pool_state(_C, UUID, Req, 0) ->
     %% {ok, VM} = fifo_vms:get(UUID, C),
     %% {ok, Creating} = jsxd:get(<<"creating">>, VM),
     %% {ok, State} = jsxd:get(<<"state">>, VM),
-    %% io:format(user, "[~s:~s] timeout: ~s/~s~n", [UUID, Req, State, Creating]),
+    io:format(user, "timeout: ~s -> ~s~n", [UUID, Req]),
     %% erlang:halt(),
+    io:fread("Something went wrong, continue?> ", "~s"),
     {error, timeout};
 
 pool_state(C, UUID, Req, L) ->
@@ -691,7 +674,7 @@ pool_state(C, UUID, Req, L) ->
         {ok, VM} ->
             case {jsxd:get(<<"creating">>, VM), jsxd:get(<<"state">>, VM)} of
                 {{ok, true}, _} ->
-                    timer:sleep(1000),
+                    timer:sleep(500),
                     wiggle_eqc:pool_state(C, UUID, Req, L - 1);
                 {_, {ok, <<"running">>}} when Req == running ->
                     ok;
@@ -700,55 +683,17 @@ pool_state(C, UUID, Req, L) ->
                 {_, {ok, <<"failed">>}} ->
                     {error, failed};
                 {_, {ok, _State}} ->
-                    timer:sleep(1000),
+                    timer:sleep(500),
                     wiggle_eqc:pool_state(C, UUID, Req, L - 1)
             end;
+        {error, timeout} ->
+            timer:sleep(500),
+            wiggle_eqc:pool_state(C, UUID, Req, L - 1);
         {error, 404} when Req == deleted ->
             ok
     end.
 
 %% This should be imported via fqc.hrl but the import has some issues
-
--define(OUT(P),
-        on_output(fun
-                      (".", []) ->
-                         io:fwrite(user, <<"\e[0;32m*\e[0m">>, []);
-                      ("x", []) ->
-                         io:format(user, <<"\e[0;33mx\e[0m">>, []);
-                      ("Failed! ", []) ->
-                         io:format(user, <<"\e[0;31mFailed! \e[0m">>, []);
-                      (S, F) ->
-                         io:format(user, S, F)
-                 end, P)).
-
--define(EQC_NUM_TESTS, 10).
-
--ifndef(EQC_NUM_TESTS).
-
--ifdef(EQC_LONG_TESTS).
--define(EQC_NUM_TESTS, 5000).
--else.  % EQC_LONG_TESTS
--ifdef(EQC_SHORT_TEST).
--define(EQC_NUM_TESTS, 100).
--else.  % EQC_SHORT_TEST
--define(EQC_NUM_TESTS, 500).
--endif. % EQC_SHORT_TEST
--endif. % EQC_LONG_TESTS
-
--endif. % EQC_NUM_TESTS
-
--ifndef(EQC_EUNIT_TIMEUT).
--define(EQC_EUNIT_TIMEUT, (?EQC_NUM_TESTS div 5)).
--endif.
-
-run_test_() ->
-    [{exports, E} | _] = module_info(),
-    E1 = [{atom_to_list(N), N} || {N, 0} <- E],
-    E2 = [{N, A} || {"prop_" ++ N, A} <- E1],
-    [{"Running " ++ N ++ " propperty test",
-      {timeout, ?EQC_EUNIT_TIMEUT,
-       ?_assert(quickcheck(numtests(?EQC_NUM_TESTS,  ?OUT(?MODULE:A()))))}}
-     || {N, A} <- E2].
 
 has_admin(#state{admin = A}) ->
     A /= undefined.

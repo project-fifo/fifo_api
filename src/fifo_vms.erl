@@ -172,7 +172,7 @@ metadata_set(UUID, Path, Value, C) ->
     {Prefix, K} = fifo_api_http:take_last(Path),
     Body = [{K, Value}],
     URLElements = [?ENDPOINT, binary_to_list(UUID), "metadata" | Prefix],
-    URL = strings:join(URLElements, "/"),
+    URL = string:join(URLElements, "/"),
     fifo_api_http:put(URL, Body, C).
 
 %%--------------------------------------------------------------------
