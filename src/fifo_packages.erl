@@ -24,7 +24,7 @@
 %%--------------------------------------------------------------------
 %% @doc
 %% Lists all the Packages for the current user, when Full is false only
-%% the UUID of the Packages are returned, otehrwise the full data is
+%% the UUID of the Packages are returned, otherwise the full data is
 %% returned.
 %%
 %% When returning the full data Fields can be used to filter the
