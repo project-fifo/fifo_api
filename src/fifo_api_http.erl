@@ -19,7 +19,7 @@
           endpoint = "localhost" :: string(),
           port = 80 :: pos_integer(),
           prefix = "api" :: string(),
-          version = "2" :: string(),
+          version = "3" :: string(),
           token :: binary() | undefined
          }).
 
@@ -32,8 +32,25 @@
 
 -type connection() :: #connection{}.
 
--define(MSGPACK,  <<"application/x-msgpack">>).
--define(JSON,  <<"application/json">>).
+
+
+-ifdef(USE_MSGPACK).
+-define(ENCODING,  <<"application/x-msgpack">>).
+encode(E) ->
+    msgpack:pack(E, [{map_format, jsx}]).
+decode(E) ->
+    {ok, R} = msgpack:unpack(E, [{map_format, jsx}]),
+    R.
+-else.
+-define(ENCODING,  <<"application/json">>).
+encode(E) ->
+    jsx:encode(E).
+decode(E) ->
+    jsx:decode(E).
+-endif.
+
+
+
 
 new(Options) ->
     new(Options, #connection{}).
@@ -63,7 +80,7 @@ get_(URL, C) ->
 
 get_(URL, Opts, C) ->
     ConnPid = connect(C),
-    ReqHeaders = token_opts([{<<"accept-encoding">>, ?MSGPACK} | Opts], C),
+    ReqHeaders = token_opts([{<<"accept">>, ?ENCODING} | Opts], C),
     StreamRef = gun:get(ConnPid, URL, ReqHeaders),
     case gun:await(ConnPid, StreamRef) of
         {response, fin, Code, _Hdrs} when Code >= 400 ->
@@ -71,7 +88,8 @@ get_(URL, Opts, C) ->
             {error, Code};
         {response, nofin, _Status, _Hdrs} ->
             {ok, Body1} = gun:await_body(ConnPid, StreamRef),
-            {ok, Body2} = msgpack:unpack(Body1, [jsx]),
+            io:format(user, "> ~p~n", [Body1]),
+            Body2 = decode(Body1),
             gun:close(ConnPid),
             {ok, Body2};
         E ->
@@ -82,7 +100,7 @@ get_(URL, Opts, C) ->
 delete(Path, Opts, C) ->
     ConnPid = connect(C),
     URL = url(Path, C),
-    ReqHeaders = token_opts([{<<"accept-encoding">>, ?MSGPACK} | Opts], C),
+    ReqHeaders = token_opts([{<<"accept">>, ?ENCODING} | Opts], C),
     StreamRef = gun:delete(ConnPid, URL, ReqHeaders),
     case gun:await(ConnPid, StreamRef) of
         {response, fin, Code, _Hdrs} when Code >= 400 ->
@@ -93,7 +111,7 @@ delete(Path, Opts, C) ->
             ok;
         {response, nofin, _Status, _Hdrs} ->
             {ok, Body1} = gun:await_body(ConnPid, StreamRef),
-            {ok, Body2} = msgpack:unpack(Body1, [jsx]),
+            Body2 = decode(Body1),
             gun:close(ConnPid),
             {ok, Body2};
         E ->
@@ -104,9 +122,9 @@ delete(Path, Opts, C) ->
 post(Path, Body, C) ->
     ConnPid = connect(C),
     URL = url(Path, C),
-    ReqHeaders = token_opts([{<<"accept-encoding">>, ?MSGPACK},
-                             {<<"content-type">>, ?MSGPACK}], C),
-    ReqBody = msgpack:pack(Body, [jsx]),
+    ReqHeaders = token_opts([{<<"accept">>, ?ENCODING},
+                             {<<"content-type">>, ?ENCODING}], C),
+    ReqBody = encode(Body),
     StreamRef = gun:post(ConnPid, URL, ReqHeaders),
     gun:data(ConnPid, StreamRef, fin, ReqBody),
     case gun:await(ConnPid, StreamRef) of
@@ -121,7 +139,7 @@ post(Path, Body, C) ->
             ok;
         {response, nofin, 200, _Hdrs} ->
             {ok, Body1} = gun:await_body(ConnPid, StreamRef),
-            {ok, Body2} = msgpack:unpack(Body1, [jsx]),
+            Body2 = decode(Body1),
             gun:close(ConnPid),
             {ok, Body2};
         {response, fin, 303, H} ->
@@ -136,9 +154,9 @@ post(Path, Body, C) ->
 put(Path, Body, C) ->
     ConnPid = connect(C),
     URL = url(Path, C),
-    ReqHeaders = token_opts([{<<"accept-encoding">>, ?MSGPACK},
-                             {<<"content-type">>, ?MSGPACK}], C),
-    ReqBody = msgpack:pack(Body, [jsx]),
+    ReqHeaders = token_opts([{<<"accept">>, ?ENCODING},
+                             {<<"content-type">>, ?ENCODING}], C),
+    ReqBody = encode(Body),
     StreamRef = gun:put(ConnPid, URL, ReqHeaders),
     gun:data(ConnPid, StreamRef, fin, ReqBody),
     case gun:await(ConnPid, StreamRef) of
@@ -153,7 +171,7 @@ put(Path, Body, C) ->
             ok;
         {response, nofin, 200, _Hdrs} ->
             {ok, Body1} = gun:await_body(ConnPid, StreamRef),
-            {ok, Body2} = msgpack:unpack(Body1, [jsx]),
+            Body2 = decode(Body1),
             gun:close(ConnPid),
             {ok, Body2};
         {response, fin, 303, H} ->

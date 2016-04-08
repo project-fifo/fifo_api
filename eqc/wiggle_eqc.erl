@@ -68,18 +68,19 @@
           user1 => ?USER1,
           user2 => ?USER2
          }).
--define(DATASET, [<<"b67492c2-055c-11e5-85d8-8b039ac981ec">>]).
--define(PACKAGE, [<<"42bf38f3-5632-49cb-82ce-973a04c3a8f6">>]).
--define(NETWORK, <<"faa25949-e8a2-446f-b01a-ddf17f058016">>).
--define(ENDPOINT, "192.168.1.41").
--define(ENDPOINTS, ["192.168.1.41", "192.168.1.42"]).
--define(CREATION_CONCURRENCY, 2).
+-define(DATASET, [<<"088b97b0-e1a1-11e5-b895-9baa2086eb33">>]).
+-define(PACKAGE, [<<"07167cfa-a033-4100-9aaa-f93205c3c891">>]).
+-define(NETWORK, <<"097d1ef1-85c1-4d48-9fe8-0b1e6f8541a6">>).
+-define(ENDPOINT, "192.168.1.43").
+-define(ENDPOINTS, ["192.168.1.43", "192.168.1.44",
+                    "192.168.1.45", "192.168.1.46"]).
+-define(CREATION_CONCURRENCY, 4).
 
 -define(CREATE_TIMEOUT, 320).
 -define(START_TIMEOUT, 60).
 -define(STOP_TIMEOUT, 60).
 -define(DELETE_TIMEOUT, 60).
--define(MAX_VMS, 5).
+-define(MAX_VMS, 20).
 -define(R(C), fifo_api_http:reset(C)).
 
 -record(user, {
@@ -172,6 +173,7 @@ wait_for_creation_args(#state{admin = Admin, creating = Creating}) ->
     [Admin, elements(Creating)].
 
 wait_for_creation(C, {UUID, T0}) ->
+    io:format(user, "> ~p~n", [{UUID, T0}]),
     D = erlang:system_time(seconds) -  T0,
     D1 = max(1, ?CREATE_TIMEOUT - D),
     pool_state(C, UUID, running, D1*2).

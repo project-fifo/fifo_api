@@ -67,7 +67,8 @@ get(UUID, C) ->
 %%--------------------------------------------------------------------
 
 -spec auth(Login :: binary(), Pass :: binary(), fifo_api_http:connection()) ->
-                  {ok, Token :: binary()}.
+                  {ok, Token :: binary()} |
+                  {error, term()}.
 
 auth(Login, Pass, C) ->
     L1 = list_to_binary(http_uri:encode(binary_to_list(Login))),

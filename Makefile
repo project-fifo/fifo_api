@@ -1,4 +1,4 @@
-REBAR = rebar3
+REBAR = ./rebar3
 VSN = $(shell cat src/*.app.src | grep vsn | sed 's/^[^"]*"//' | sed 's/".*$//')
 
 .PHONY: all test
