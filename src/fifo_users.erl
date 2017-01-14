@@ -2,7 +2,7 @@
 %%% @author Heinz Nikolaus Gies <heinz@licenser.net>
 %%% @copyright (C) 2015, Heinz Nikolaus Gies
 %%% @doc
-%%% This module offers a interface to the FIFO API in the /datasets
+%%% This module offers a interface to the FIFO API in the /users
 %%% endpoint
 %%% @end
 %%% Created : 29 Jan 2015 by Heinz Nikolaus Gies <heinz@licenser.net>
@@ -30,7 +30,7 @@
 %%--------------------------------------------------------------------
 %% @doc
 %% Lists all the Datasets for the current user, when Full is false only
-%% the UUID of the Datasets are returned, otehrwise the full data is
+%% the UUID of the Datasets are returned, otherwise the full data is
 %% returned.
 %%
 %% When returning the full data Fields can be used to filter the
