@@ -68,12 +68,14 @@
           user1 => ?USER1,
           user2 => ?USER2
          }).
--define(DATASET, [<<"088b97b0-e1a1-11e5-b895-9baa2086eb33">>]).
+-define(DS_LX, <<"4d3ed29a-c851-11e6-b5a9-639aada4a9c8">>).
+-define(DS_Z, <<"3c999bae-d419-11e6-adea-e730a3c335c6">>).
+-define(DATASET, [?DS_LX, ?DS_Z]).
 -define(PACKAGE, [<<"07167cfa-a033-4100-9aaa-f93205c3c891">>]).
 -define(NETWORK, <<"097d1ef1-85c1-4d48-9fe8-0b1e6f8541a6">>).
--define(ENDPOINT, "192.168.1.43").
--define(ENDPOINTS, ["192.168.1.43", "192.168.1.44",
-                    "192.168.1.45", "192.168.1.46"]).
+-define(ENDPOINT, "192.168.1.40").
+-define(ENDPOINTS, ["192.168.1.40", "192.168.1.41",
+                    "192.168.1.42", "192.168.1.43"]).
 -define(CREATION_CONCURRENCY, 4).
 
 -define(CREATE_TIMEOUT, 320).
@@ -173,7 +175,6 @@ wait_for_creation_args(#state{admin = Admin, creating = Creating}) ->
     [Admin, elements(Creating)].
 
 wait_for_creation(C, {UUID, T0}) ->
-    io:format(user, "> ~p~n", [{UUID, T0}]),
     D = erlang:system_time(seconds) -  T0,
     D1 = max(1, ?CREATE_TIMEOUT - D),
     pool_state(C, UUID, running, D1*2).
@@ -278,7 +279,8 @@ create_vm_pre(#state{login_owners = Owners},
     maps:find(C, Owners) == {ok, ID}.
 
 create_vm(#user{connection = C}, Package, Dataset) ->
-    Config = [{<<"networks">>, [{<<"net0">>, ?NETWORK}]}],
+    Config = [{<<"alias">>, <<"eqc">>},
+              {<<"networks">>, [{<<"net0">>, ?NETWORK}]}],
     {ok, VmData} = fifo_vms:create(Dataset, Package, Config, C),
     {ok, UUID} = jsxd:get(<<"uuid">>, VmData),
     {UUID, erlang:system_time(seconds)}.
@@ -589,7 +591,7 @@ prop_wiggle() ->
            end,
            ?FORALL(Cmds, commands(?MODULE),
                    begin
-                       {H, S, Res} = run_commands(?MODULE, Cmds,
+                       {H, S, Res} = run_commands(Cmds,
                                                   [{admin, admin()}]),
                        Res1 = cleanup_vms(S#state.admin, S#state.creating,
                                           S#state.deleting),
@@ -600,10 +602,10 @@ prop_wiggle() ->
                                {_, ok} ->
                                    false;
                                {ok, _} ->
-                                   io:format("Res1: ~p~n", [Res1]),
+                                   io:format("[~p] Res1: ~p~n", [?LINE, Res1]),
                                    false;
                                _ ->
-                                   io:format("Res1: ~p~n", [Res1]),
+                                   io:format("[~p] Res1: ~p~n", [?LINE, Res1]),
                                    false
                            end,
                        pretty_commands(?MODULE, Cmds, {H, S, Res}, Success)
@@ -666,7 +668,7 @@ pool_state(_C, UUID, Req, 0) ->
     %% {ok, VM} = fifo_vms:get(UUID, C),
     %% {ok, Creating} = jsxd:get(<<"creating">>, VM),
     %% {ok, State} = jsxd:get(<<"state">>, VM),
-    io:format(user, "timeout: ~s -> ~s~n", [UUID, Req]),
+    io:format(user, "[~p] timeout: ~s -> ~s~n", [?LINE, UUID, Req]),
     %% erlang:halt(),
     io:fread("Something went wrong, continue?> ", "~s"),
     {error, timeout};

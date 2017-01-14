@@ -35,7 +35,7 @@ docs:
 ##
 
 xref: all
-	$(REBAR) xref skip_deps=true -r
+	$(REBAR) xref
 
 ##
 ## Dialyzer

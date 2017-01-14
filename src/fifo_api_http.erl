@@ -87,11 +87,15 @@ get_(URL, Opts, C) ->
             gun:close(ConnPid),
             {error, Code};
         {response, nofin, _Status, _Hdrs} ->
-            {ok, Body1} = gun:await_body(ConnPid, StreamRef),
-            io:format(user, "> ~p~n", [Body1]),
-            Body2 = decode(Body1),
-            gun:close(ConnPid),
-            {ok, Body2};
+            case  gun:await_body(ConnPid, StreamRef) of
+                {ok, Body1} ->
+                    Body2 = decode(Body1),
+                    gun:close(ConnPid),
+                    {ok, Body2};
+                E1 ->
+                    gun:close(ConnPid),
+                    E1
+            end;
         E ->
             gun:close(ConnPid),
             E
@@ -110,10 +114,15 @@ delete(Path, Opts, C) ->
             gun:close(ConnPid),
             ok;
         {response, nofin, _Status, _Hdrs} ->
-            {ok, Body1} = gun:await_body(ConnPid, StreamRef),
-            Body2 = decode(Body1),
-            gun:close(ConnPid),
-            {ok, Body2};
+            case gun:await_body(ConnPid, StreamRef) of
+                {ok, Body1} ->
+                    Body2 = decode(Body1),
+                    gun:close(ConnPid),
+                    {ok, Body2};
+                E1 ->
+                    gun:close(ConnPid),
+                    E1
+            end;
         E ->
             gun:close(ConnPid),
             E
@@ -138,10 +147,15 @@ post(Path, Body, C) ->
             gun:close(ConnPid),
             ok;
         {response, nofin, 200, _Hdrs} ->
-            {ok, Body1} = gun:await_body(ConnPid, StreamRef),
-            Body2 = decode(Body1),
-            gun:close(ConnPid),
-            {ok, Body2};
+            case gun:await_body(ConnPid, StreamRef) of
+                {ok, Body1} ->
+                    Body2 = decode(Body1),
+                    gun:close(ConnPid),
+                    {ok, Body2};
+                E1 ->
+                    gun:close(ConnPid),
+                    E1
+            end;
         {response, fin, 303, H} ->
             Location = proplists:get_value(<<"location">>, H),
             gun:close(ConnPid),
@@ -170,10 +184,15 @@ put(Path, Body, C) ->
             gun:close(ConnPid),
             ok;
         {response, nofin, 200, _Hdrs} ->
-            {ok, Body1} = gun:await_body(ConnPid, StreamRef),
-            Body2 = decode(Body1),
-            gun:close(ConnPid),
-            {ok, Body2};
+            case gun:await_body(ConnPid, StreamRef) of
+                {ok, Body1} ->
+                    Body2 = decode(Body1),
+                    gun:close(ConnPid),
+                    {ok, Body2};
+                E1 ->
+                    gun:close(ConnPid),
+                    E1
+            end;
         {response, fin, 303, H} ->
             Location = proplists:get_value(<<"location">>, H),
             gun:close(ConnPid),
