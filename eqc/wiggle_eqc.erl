@@ -650,7 +650,10 @@ ensure_empty(Admin, User1, User2, Deleting, I) ->
                      %% need to wait this out :/
                      timer:sleep(30000);
                  _ ->
-                     ok = fifo_vms:delete(UUID, Admin)
+                     case fifo_vms:delete(UUID, Admin) of
+                         ok -> ok;
+                         {error,404} -> ok
+                     end
              end || UUID <- UUIDs1],
             timer:sleep(500),
             ensure_empty(Admin, User1, User2, Deleting, I + 1);
